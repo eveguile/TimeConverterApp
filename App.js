@@ -1,5 +1,7 @@
 // App.js
 import React, { useState, useEffect, useRef } from 'react';
+
+// Core React Native UI components
 import {
   View,
   Text,
@@ -7,51 +9,83 @@ import {
   ScrollView,
   TextInput,
   Modal,
-  StyleSheet,
-  Dimensions,
   PanResponder,
   Animated,
   Platform,
 } from 'react-native';
+
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import * as Calendar from 'expo-calendar';
+import styles, { SCREEN_WIDTH, SCREEN_HEIGHT } from './styles';
 
-const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
-
+// Main app component
 export default function TimeConverterApp() {
+
+  // Controls visibility of the drop-down view menu
   const [showViewMenu, setShowViewMenu] = useState(false);
+
+  // The active user-created view (e.g. "Default", "Work", etc.)
   const [currentView, setCurrentView] = useState('Default');
-  
+
   const now = new Date();
+
+  // Stores time/date/location settings for each view
   const [viewStates, setViewStates] = useState(() => ({
     Default: {
       locations: [],
       time: now.getHours(),
-      minutes: Math.floor(now.getMinutes() / 15) * 15,
+      minutes: Math.floor(now.getMinutes() / 15) * 15, // round to nearest 15 min
       date: new Date(now.getFullYear(), now.getMonth(), now.getDate())
     }
   }));
-  
+
+  // List of all saved views
   const [allViews, setAllViews] = useState(['Default']);
+
+  // Controls “Add View” popup
   const [showAddView, setShowAddView] = useState(false);
+
+  // New view name input
   const [newViewName, setNewViewName] = useState('');
+
+  // Location search popup
   const [showLocationPopup, setShowLocationPopup] = useState(false);
+
+  // Search bar text
   const [searchQuery, setSearchQuery] = useState('');
+
+  // Search results for world cities
   const [locations, setLocations] = useState([]);
+
+  // List of selected cities inside the current view
   const [selectedLocations, setSelectedLocations] = useState([]);
+
+  // The base time the whole view is calculated from
   const [baseTime, setBaseTime] = useState(now.getHours());
   const [baseMinutes, setBaseMinutes] = useState(Math.floor(now.getMinutes() / 15) * 15);
   const [baseDate, setBaseDate] = useState(new Date(now.getFullYear(), now.getMonth(), now.getDate()));
+
+  // Tracks how much the user moved the time slider (1 unit = 15 minutes)
   const [totalQuartersMoved, setTotalQuartersMoved] = useState(0);
+
+  // Calendar popup visibility
   const [showCalendar, setShowCalendar] = useState(false);
+
+  // Which month is shown in the calendar
   const [calendarMonth, setCalendarMonth] = useState(new Date(now.getFullYear(), now.getMonth(), now.getDate()));
+
+  // Stores temporary slider movement before the user lets go
   const [pendingQuarterChange, setPendingQuarterChange] = useState(0);
 
+  // Animated value for the horizontal time slider
   const sliderPosition = useRef(new Animated.Value(0)).current;
+
+  // Stores swipe positions for individual rows
   const swipePositions = useRef({}).current;
 
+  // Static world city list used for searching and selection
   const worldCities = [
     { city: 'Shanghai', country: 'China', timezone: 'Asia/Shanghai', utcOffset: 8 },
     { city: 'London', country: 'United Kingdom', timezone: 'Europe/London', utcOffset: 0 },
@@ -86,6 +120,7 @@ export default function TimeConverterApp() {
     }
   }, [searchQuery]);
 
+  // Plays a small "tap" vibration on supported devices
   const triggerHaptic = () => {
     if (Platform.OS === 'ios') {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -94,18 +129,21 @@ export default function TimeConverterApp() {
     }
   };
 
+  // Returns the sky color gradient based on current time of day
   const getTimeGradient = (hour, minutes) => {
     const totalMinutes = hour * 60 + minutes;
     if (totalMinutes >= 1200 || totalMinutes < 480) {
-      return ['#1e3a8a', '#0f172a'];
+      return ['#1e3a8a', '#0f172a']; // night
     } else if (totalMinutes >= 480 && totalMinutes < 540) {
+      // sunrise transition
       const progress = (totalMinutes - 480) / 60;
       if (progress < 0.33) return ['#1e3a8a', '#1e40af'];
       else if (progress < 0.67) return ['#1e40af', '#2563eb'];
       else return ['#2563eb', '#38bdf8'];
     } else if (totalMinutes >= 540 && totalMinutes < 1140) {
-      return ['#38bdf8', '#3b82f6'];
+      return ['#38bdf8', '#3b82f6']; // daytime
     } else {
+      // sunset transition
       const progress = (totalMinutes - 1140) / 60;
       if (progress < 0.33) return ['#38bdf8', '#2563eb'];
       else if (progress < 0.67) return ['#2563eb', '#1e40af'];
@@ -113,11 +151,17 @@ export default function TimeConverterApp() {
     }
   };
 
+  // Adds a new view
   const handleAddView = () => {
     if (newViewName.trim() && !allViews.includes(newViewName.trim())) {
+
       const viewName = newViewName.trim();
       const now = new Date();
+
+      // Add new view to the list
       setAllViews([...allViews, viewName]);
+
+      // Initialize default time/date for the view
       setViewStates(prev => ({
         ...prev,
         [viewName]: {
@@ -127,27 +171,36 @@ export default function TimeConverterApp() {
           date: new Date(now.getFullYear(), now.getMonth(), now.getDate())
         }
       }));
+
       setNewViewName('');
       setShowAddView(false);
     }
   };
 
+  // Removes a view (unless it's the only one)
   const handleDeleteView = (viewName) => {
     if (allViews.length === 1) return;
+
     setAllViews(allViews.filter(v => v !== viewName));
+
     const newViewStates = { ...viewStates };
     delete newViewStates[viewName];
     setViewStates(newViewStates);
+
+    // If user deletes the active view, switch to the next available one
     if (currentView === viewName) {
       setCurrentView(allViews.filter(v => v !== viewName)[0]);
     }
   };
 
+  // Adjusts the base time to match the selected main location
   const setCurrentTimeForLocation = () => {
     if (selectedLocations.length === 0) return;
 
     const now = new Date();
     const mainLocation = selectedLocations[0];
+
+    // Convert user's local time → UTC → mainLocation time
     const userLocalOffset = -now.getTimezoneOffset() / 60;
     const userLocalHour = now.getHours();
     const userLocalMinutes = now.getMinutes();
@@ -159,6 +212,7 @@ export default function TimeConverterApp() {
     let locationMinutes = locationTotalMinutes % 60;
     let locationDate = new Date(now);
 
+    // Handle day rollover (e.g. +1 day or -1 day)
     while (locationHour >= 24) {
       locationHour -= 24;
       locationDate.setDate(locationDate.getDate() + 1);
@@ -168,33 +222,31 @@ export default function TimeConverterApp() {
       locationDate.setDate(locationDate.getDate() - 1);
     }
 
-    if (locationMinutes < 0) {
-      locationMinutes += 60;
-      locationHour -= 1;
-      if (locationHour < 0) {
-        locationHour += 24;
-        locationDate.setDate(locationDate.getDate() - 1);
-      }
-    }
-
+    // Round to nearest quarter hour
     const roundedMinutes = Math.floor(locationMinutes / 15) * 15;
+
+    // Compute how many 15-minute steps away from reference we are
     const quartersDiff = Math.floor((locationHour * 60 + roundedMinutes - (20 * 60)) / 15);
+
     const referenceDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const daysDiff = Math.floor((locationDate - referenceDate) / (1000 * 60 * 60 * 24));
 
     setBaseTime(locationHour);
     setBaseMinutes(roundedMinutes);
     setBaseDate(new Date(locationDate.getFullYear(), locationDate.getMonth(), locationDate.getDate()));
-    setTotalQuartersMoved(quartersDiff + (daysDiff * 96));
+    setTotalQuartersMoved(quartersDiff + daysDiff * 96);
   };
 
+  // Switches to a different saved view
   const handleViewChange = (view) => {
     setCurrentView(view);
     setShowViewMenu(false);
   };
 
+  // Whenever the active view changes, load its saved state
   useEffect(() => {
     const currentState = viewStates[currentView];
+
     setSelectedLocations(currentState.locations);
     setBaseTime(currentState.time);
     setBaseMinutes(currentState.minutes || 0);
@@ -204,9 +256,11 @@ export default function TimeConverterApp() {
     const totalMinutes = currentState.time * 60 + (currentState.minutes || 0);
     const referenceDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const daysDiff = Math.floor((currentState.date - referenceDate) / (1000 * 60 * 60 * 24));
-    setTotalQuartersMoved(Math.floor((totalMinutes - 20 * 60) / 15) + (daysDiff * 96));
+
+    setTotalQuartersMoved(Math.floor((totalMinutes - 20 * 60) / 15) + daysDiff * 96);
   }, [currentView]);
 
+  // Save current view’s state whenever time or locations change
   useEffect(() => {
     setViewStates(prev => ({
       ...prev,
@@ -219,6 +273,7 @@ export default function TimeConverterApp() {
     }));
   }, [selectedLocations, baseTime, baseMinutes, baseDate, currentView]);
 
+  // Adds a new city to the selected list
   const handleLocationSelect = (location) => {
     if (!selectedLocations.find(loc => loc.city === location.city)) {
       setSelectedLocations([...selectedLocations, { ...location, id: Date.now() }]);
@@ -227,15 +282,19 @@ export default function TimeConverterApp() {
     setSearchQuery('');
   };
 
+  // Calculates transformed time for each additional location
   const calculateTimeForLocation = (location) => {
-    if (!selectedLocations.length) return { hour: baseTime, minutes: baseMinutes, date: baseDate };
+    if (!selectedLocations.length) {
+      return { hour: baseTime, minutes: baseMinutes, date: baseDate };
+    }
 
     const mainLocation = selectedLocations[0];
-    const timeDiffHours = location.utcOffset - mainLocation.utcOffset;
-    const timeDiffMinutes = timeDiffHours * 60;
+    const timeDiffMinutes = (location.utcOffset - mainLocation.utcOffset) * 60;
+
     let totalMinutes = baseTime * 60 + baseMinutes + timeDiffMinutes;
     let date = new Date(baseDate);
 
+    // Adjust for next/previous day if needed
     while (totalMinutes >= 1440) {
       totalMinutes -= 1440;
       date.setDate(date.getDate() + 1);
@@ -245,25 +304,29 @@ export default function TimeConverterApp() {
       date.setDate(date.getDate() - 1);
     }
 
-    const hour = Math.floor(totalMinutes / 60);
-    const minutes = totalMinutes % 60;
-
-    return { hour, minutes, date };
+    return {
+      hour: Math.floor(totalMinutes / 60),
+      minutes: totalMinutes % 60,
+      date
+    };
   };
 
+  // Formats date as “Wed, Feb 12”
   const getDateString = (date) => {
     const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
     const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     return `${days[date.getDay()]}, ${months[date.getMonth()]} ${date.getDate()}`;
   };
 
+  // Converts 24-hour time to 12-hour format
   const formatTime = (hour, minutes) => {
     const h = hour % 12 || 12;
     const m = minutes.toString().padStart(2, '0');
     const ampm = hour >= 12 ? 'pm' : 'am';
-    return `${h}:${m} ${ampm}`;
+    return `${h}:${m}${ampm}`;
   };
 
+  // Returns readable time difference compared to the first (main) selected location
   const getTimeDifference = (location) => {
     if (!selectedLocations.length || location.id === selectedLocations[0].id) return null;
 
@@ -274,25 +337,36 @@ export default function TimeConverterApp() {
     return 'Same Time';
   };
 
+  // Handles dragging the main timeline slider and updating the base time/date
   const sliderPanResponder = useRef(
     PanResponder.create({
+      // Start responding immediately
       onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder: () => true,
+
+      // Reset temporary quarter movement on touch start
       onPanResponderGrant: () => {
         setPendingQuarterChange(0);
       },
+
+      // Convert drag distance → 15-minute increments and preview updated time
       onPanResponderMove: (_, gestureState) => {
         const deltaX = gestureState.dx;
         const quarterChange = -Math.round((deltaX / SCREEN_WIDTH) * 48);
-        
+
         if (quarterChange !== pendingQuarterChange) {
           setPendingQuarterChange(quarterChange);
-          triggerHaptic();
+          triggerHaptic(); // haptic feedback on each quarter jump
         }
 
         const snappedQuarters = totalQuartersMoved + quarterChange;
         const referenceDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-        const totalMinutes = (referenceDate.getHours() * 60 + Math.floor(referenceDate.getMinutes() / 15) * 15) + (snappedQuarters * 15);
+
+        const totalMinutes =
+          referenceDate.getHours() * 60 +
+          Math.floor(referenceDate.getMinutes() / 15) * 15 +
+          snappedQuarters * 15;
+
         let newHour = Math.floor(totalMinutes / 60) % 24;
         let newMinutes = Math.round((totalMinutes % 60) / 15) * 15;
 
@@ -310,12 +384,18 @@ export default function TimeConverterApp() {
         setBaseMinutes(newMinutes);
         setBaseDate(newDate);
       },
+
+      // Finalize the time change when user releases the drag
       onPanResponderRelease: () => {
         const targetQuarters = totalQuartersMoved + pendingQuarterChange;
         setTotalQuartersMoved(targetQuarters);
 
         const referenceDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-        const totalMinutes = (referenceDate.getHours() * 60 + Math.floor(referenceDate.getMinutes() / 15) * 15) + (targetQuarters * 15);
+        const totalMinutes =
+          referenceDate.getHours() * 60 +
+          Math.floor(referenceDate.getMinutes() / 15) * 15 +
+          targetQuarters * 15;
+
         let newHour = Math.floor(totalMinutes / 60) % 24;
         let newMinutes = Math.round((totalMinutes % 60) / 15) * 15;
 
@@ -337,6 +417,7 @@ export default function TimeConverterApp() {
     })
   ).current;
 
+  // Creates a horizontal swipe gesture for each location card (delete/pin)
   const createSwipePanResponder = (locationId) => {
     if (!swipePositions[locationId]) {
       swipePositions[locationId] = new Animated.Value(0);
@@ -344,14 +425,23 @@ export default function TimeConverterApp() {
 
     return PanResponder.create({
       onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: (_, gestureState) => Math.abs(gestureState.dx) > 10,
+
+      // Only activate pan when swiping horizontally
+      onMoveShouldSetPanResponder: (_, gestureState) =>
+        Math.abs(gestureState.dx) > 10,
+
+      // Drag left to reveal actions (max -160px)
       onPanResponderMove: (_, gestureState) => {
         if (gestureState.dx < 0) {
           swipePositions[locationId].setValue(Math.max(gestureState.dx, -160));
         } else if (swipePositions[locationId]._value < 0) {
-          swipePositions[locationId].setValue(Math.min(gestureState.dx + swipePositions[locationId]._value, 0));
+          swipePositions[locationId].setValue(
+            Math.min(gestureState.dx + swipePositions[locationId]._value, 0)
+          );
         }
       },
+
+      // Snap open or closed depending on swipe distance
       onPanResponderRelease: (_, gestureState) => {
         if (gestureState.dx < -80) {
           Animated.spring(swipePositions[locationId], {
@@ -368,8 +458,10 @@ export default function TimeConverterApp() {
     });
   };
 
+  // Removes a location and resets swipe animation
   const deleteLocation = (locationId) => {
-    setSelectedLocations(selectedLocations.filter(loc => loc.id !== locationId));
+    setSelectedLocations(selectedLocations.filter((loc) => loc.id !== locationId));
+
     if (swipePositions[locationId]) {
       Animated.spring(swipePositions[locationId], {
         toValue: 0,
@@ -380,9 +472,10 @@ export default function TimeConverterApp() {
     }
   };
 
+  // Moves a location to the top (pin) and resets swipe position
   const pinLocation = (locationId) => {
-    const locationToPin = selectedLocations.find(loc => loc.id === locationId);
-    const otherLocations = selectedLocations.filter(loc => loc.id !== locationId);
+    const locationToPin = selectedLocations.find((loc) => loc.id === locationId);
+    const otherLocations = selectedLocations.filter((loc) => loc.id !== locationId);
     setSelectedLocations([locationToPin, ...otherLocations]);
 
     if (swipePositions[locationId]) {
@@ -393,18 +486,22 @@ export default function TimeConverterApp() {
     }
   };
 
+  // Generates hour/minute tick marks for the slider timeline
   const renderSliderTicks = () => {
     const ticks = [];
-    const currentTotalMinutes = baseTime * 60 + baseMinutes + (pendingQuarterChange * 15);
+    const currentTotalMinutes =
+      baseTime * 60 + baseMinutes + pendingQuarterChange * 15;
 
     for (let i = -12; i <= 12; i++) {
-      const tickTotalMinutes = currentTotalMinutes + (i * 15);
+      const tickTotalMinutes = currentTotalMinutes + i * 15;
+
       let adjustedMinutes = tickTotalMinutes % 1440;
       if (adjustedMinutes < 0) adjustedMinutes += 1440;
 
       const tickHour = Math.floor(adjustedMinutes / 60);
       const tickMinute = adjustedMinutes % 60;
-      const isHour = tickMinute === 0;
+
+      const isHour = tickMinute === 0; // highlight full hours
 
       ticks.push({ hour: isHour ? tickHour : null, isHour, key: i });
     }
@@ -412,6 +509,7 @@ export default function TimeConverterApp() {
     return ticks;
   };
 
+  // Generates a 7-day range centered around the selected base date
   const generateWeekDays = () => {
     const days = [];
     const startDate = new Date(baseDate);
@@ -426,6 +524,7 @@ export default function TimeConverterApp() {
     return days;
   };
 
+  // Generates days for the monthly calendar view
   const generateCalendarDays = () => {
     const year = calendarMonth.getFullYear();
     const month = calendarMonth.getMonth();
@@ -434,10 +533,12 @@ export default function TimeConverterApp() {
     const startDay = firstDay.getDay();
     const days = [];
 
+    // Add blank placeholders for alignment
     for (let i = 0; i < startDay; i++) {
       days.push(null);
     }
 
+    // Add actual month days
     for (let i = 1; i <= lastDay.getDate(); i++) {
       days.push(new Date(year, month, i));
     }
@@ -445,39 +546,53 @@ export default function TimeConverterApp() {
     return days;
   };
 
+  // Navigate calendar view to previous month
   const handlePrevMonth = () => {
-    setCalendarMonth(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() - 1, 1));
+    setCalendarMonth(
+      new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() - 1, 1)
+    );
   };
 
+  // Navigate calendar view to next month
   const handleNextMonth = () => {
-    setCalendarMonth(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 1));
+    setCalendarMonth(
+      new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 1)
+    );
   };
 
+  // Creates a system calendar event using the current location/time data
   const handleAddToCalendar = async () => {
     if (selectedLocations.length === 0) return;
 
     try {
+      // Request OS permission
       const { status } = await Calendar.requestCalendarPermissionsAsync();
-      
+
       if (status !== 'granted') {
         alert('Calendar permission is required to add events');
         return;
       }
 
-      const calendars = await Calendar.getCalendarsAsync(Calendar.EntityTypes.EVENT);
-      const defaultCalendar = calendars.find(cal => cal.allowsModifications) || calendars[0];
+      // Pick a calendar that supports event creation
+      const calendars = await Calendar.getCalendarsAsync(
+        Calendar.EntityTypes.EVENT
+      );
+      const defaultCalendar =
+        calendars.find((cal) => cal.allowsModifications) || calendars[0];
 
       if (!defaultCalendar) {
         alert('No calendar available');
         return;
       }
 
+      // Build event time window (1 hour duration)
       const location = selectedLocations[0];
       const startDate = new Date(baseDate);
       startDate.setHours(baseTime, baseMinutes, 0, 0);
       const endDate = new Date(startDate);
       endDate.setHours(endDate.getHours() + 1);
 
+      // Create the event
       await Calendar.createEventAsync(defaultCalendar.id, {
         title: `Time in ${location.city}`,
         startDate: startDate,
@@ -495,9 +610,11 @@ export default function TimeConverterApp() {
   };
 
   return (
+
     <View style={styles.container}>
-      {/* Header */}
+      {/* HEADER */}
       <View style={styles.header}>
+        {/* Current View Selector */}
         <TouchableOpacity
           style={styles.viewButton}
           onPress={() => setShowViewMenu(!showViewMenu)}
@@ -507,6 +624,7 @@ export default function TimeConverterApp() {
           <Ionicons name="chevron-down" size={16} color="#9ca3af" />
         </TouchableOpacity>
 
+        {/* Add Location Button */}
         <TouchableOpacity
           style={styles.addButton}
           onPress={() => setShowLocationPopup(true)}
@@ -515,7 +633,7 @@ export default function TimeConverterApp() {
         </TouchableOpacity>
       </View>
 
-      {/* Scrollable Content */}
+      {/* SCROLLABLE LOCATIONS */}
       <ScrollView
         style={styles.scrollContent}
         contentContainerStyle={styles.scrollContentContainer}
@@ -533,12 +651,11 @@ export default function TimeConverterApp() {
 
             return (
               <View key={location.id} style={styles.locationContainer}>
+                {/* LOCATION CARD */}
                 <Animated.View
                   style={[
                     styles.locationCard,
-                    {
-                      transform: [{ translateX: isMain ? 0 : swipePositions[location.id] }],
-                    },
+                    { transform: [{ translateX: isMain ? 0 : swipePositions[location.id] }] },
                   ]}
                   {...(!isMain ? createSwipePanResponder(location.id).panHandlers : {})}
                 >
@@ -548,6 +665,7 @@ export default function TimeConverterApp() {
                     end={{ x: 1, y: 0 }}
                     style={styles.gradient}
                   >
+                    {/* Location Header */}
                     <View style={styles.locationHeader}>
                       <View style={styles.locationInfo}>
                         <View style={styles.dot} />
@@ -564,20 +682,16 @@ export default function TimeConverterApp() {
                       </View>
                     </View>
 
+                    {/* SLIDER & WEEK SELECTOR (only for main location) */}
                     {isMain && (
                       <>
                         {/* Slider */}
-                        <View
-                          style={styles.sliderContainer}
-                          {...sliderPanResponder.panHandlers}
-                        >
+                        <View style={styles.sliderContainer} {...sliderPanResponder.panHandlers}>
                           <View style={styles.ticksContainer}>
                             {renderSliderTicks().map((tick) => (
                               <View key={tick.key} style={styles.tickWrapper}>
                                 <View style={[styles.tick, tick.isHour && styles.tickHour]} />
-                                {tick.isHour && (
-                                  <Text style={styles.tickLabel}>{tick.hour}</Text>
-                                )}
+                                {tick.isHour && <Text style={styles.tickLabel}>{tick.hour}</Text>}
                               </View>
                             ))}
                           </View>
@@ -604,6 +718,7 @@ export default function TimeConverterApp() {
                               </TouchableOpacity>
                             );
                           })}
+                          {/* Calendar Button */}
                           <TouchableOpacity
                             style={styles.calendarButton}
                             onPress={() => {
@@ -619,6 +734,7 @@ export default function TimeConverterApp() {
                   </LinearGradient>
                 </Animated.View>
 
+                {/* SWIPE ACTIONS (only for non-main locations) */}
                 {!isMain && (
                   <View style={styles.swipeActions}>
                     <TouchableOpacity
@@ -641,6 +757,7 @@ export default function TimeConverterApp() {
             );
           })
         ) : (
+          /* EMPTY STATE */
           <View style={styles.emptyState}>
             <Ionicons name="globe-outline" size={64} color="#4b5563" />
             <Text style={styles.emptyText}>No time zones added yet</Text>
@@ -649,7 +766,7 @@ export default function TimeConverterApp() {
         )}
       </ScrollView>
 
-      {/* Fixed Bottom Buttons */}
+      {/* FIXED BOTTOM BUTTONS */}
       <View style={styles.bottomButtons}>
         <TouchableOpacity
           style={[styles.bottomButton, selectedLocations.length === 0 && styles.bottomButtonDisabled]}
@@ -669,7 +786,7 @@ export default function TimeConverterApp() {
         </TouchableOpacity>
       </View>
 
-      {/* View Menu Modal */}
+      {/* VIEW MENU MODAL */}
       <Modal
         visible={showViewMenu}
         transparent
@@ -729,10 +846,7 @@ export default function TimeConverterApp() {
                 </View>
               </View>
             ) : (
-              <TouchableOpacity
-                style={styles.addViewMenuItem}
-                onPress={() => setShowAddView(true)}
-              >
+              <TouchableOpacity style={styles.addViewMenuItem} onPress={() => setShowAddView(true)}>
                 <Ionicons name="add" size={16} color="#3b82f6" />
                 <Text style={styles.addViewMenuText}>Add New View</Text>
               </TouchableOpacity>
@@ -743,19 +857,22 @@ export default function TimeConverterApp() {
 
       {/* Location Popup Modal */}
       <Modal
-        visible={showLocationPopup}
+        visible={showLocationPopup}        // Shows when user taps "+" to add a location
         transparent
         animationType="slide"
-        onRequestClose={() => setShowLocationPopup(false)}
+        onRequestClose={() => setShowLocationPopup(false)} // Close on back button (Android)
       >
         <View style={styles.modalOverlay}>
           <View style={styles.locationPopup}>
+            {/* Header with title and close button */}
             <View style={styles.locationPopupHeader}>
               <Text style={styles.locationPopupTitle}>Add Location</Text>
               <TouchableOpacity onPress={() => setShowLocationPopup(false)}>
                 <Ionicons name="close" size={24} color="white" />
               </TouchableOpacity>
             </View>
+
+            {/* Search input to filter cities */}
             <TextInput
               style={styles.searchInput}
               placeholder="Search City..."
@@ -764,12 +881,14 @@ export default function TimeConverterApp() {
               onChangeText={setSearchQuery}
               autoFocus
             />
+
+            {/* Scrollable list of locations */}
             <ScrollView style={styles.locationList}>
               {locations.map((location, idx) => (
                 <TouchableOpacity
                   key={idx}
                   style={styles.locationItem}
-                  onPress={() => handleLocationSelect(location)}
+                  onPress={() => handleLocationSelect(location)} // Adds location to selected list
                 >
                   <Text style={styles.locationItemText}>
                     {location.city}, {location.country}
@@ -786,11 +905,12 @@ export default function TimeConverterApp() {
 
       {/* Calendar Modal */}
       <Modal
-        visible={showCalendar}
+        visible={showCalendar}              // Opens when user taps calendar icon in week/day selector
         transparent
         animationType="fade"
         onRequestClose={() => setShowCalendar(false)}
       >
+        {/* Overlay closes modal on tap outside */}
         <TouchableOpacity
           style={styles.modalOverlay}
           activeOpacity={1}
@@ -799,8 +919,9 @@ export default function TimeConverterApp() {
           <TouchableOpacity
             style={styles.calendarPopup}
             activeOpacity={1}
-            onPress={(e) => e.stopPropagation()}
+            onPress={(e) => e.stopPropagation()} // Prevent tap inside popup from closing modal
           >
+            {/* Calendar header: month navigation */}
             <View style={styles.calendarHeader}>
               <TouchableOpacity onPress={handlePrevMonth} style={styles.calendarArrow}>
                 <Ionicons name="chevron-back" size={24} color="white" />
@@ -812,10 +933,15 @@ export default function TimeConverterApp() {
                 <Ionicons name="chevron-forward" size={24} color="white" />
               </TouchableOpacity>
             </View>
+
+            {/* Calendar grid: weekdays + dates */}
             <View style={styles.calendarGrid}>
+              {/* Weekday labels */}
               {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => (
                 <Text key={day} style={styles.calendarDayLabel}>{day}</Text>
               ))}
+
+              {/* Calendar days */}
               {generateCalendarDays().map((day, idx) => (
                 <TouchableOpacity
                   key={idx}
@@ -825,17 +951,17 @@ export default function TimeConverterApp() {
                   ]}
                   onPress={() => {
                     if (day) {
-                      setBaseDate(day);
-                      setShowCalendar(false);
+                      setBaseDate(day);      // Set selected date
+                      setShowCalendar(false); // Close modal
                     }
                   }}
-                  disabled={!day}
+                  disabled={!day} // Disabled for placeholder days
                 >
                   <Text
                     style={[
                       styles.calendarDayText,
                       day && day.toDateString() === baseDate.toDateString() && styles.calendarDayTextSelected,
-                      !day && styles.calendarDayTextEmpty,
+                      !day && styles.calendarDayTextEmpty, // Empty text for placeholder
                     ]}
                   >
                     {day ? day.getDate() : ''}
@@ -849,447 +975,3 @@ export default function TimeConverterApp() {
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#0f172a',
-  },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingTop: 60,
-    paddingBottom: 20,
-  },
-  viewButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(31, 41, 55, 0.6)',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 25,
-  },
-  viewButtonTextOrange: {
-    color: '#fb923c',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  viewButtonTextGray: {
-    color: '#9ca3af',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  addButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  scrollContent: {
-    flex: 1,
-    paddingHorizontal: 20,
-  },
-  scrollContentContainer: {
-    paddingBottom: 20,
-  },
-  locationContainer: {
-    marginBottom: 16,
-    position: 'relative',
-  },
-  locationCard: {
-    borderRadius: 24,
-    overflow: 'hidden',
-  },
-  gradient: {
-    padding: 24,
-  },
-  locationHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: 16,
-  },
-  locationInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  dot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: 'rgba(255, 255, 255, 0.6)',
-  },
-  cityName: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: 'white',
-    marginBottom: 4,
-  },
-  locationSubtext: {
-    fontSize: 14,
-    color: 'rgba(255, 255, 255, 0.8)',
-  },
-  timeDisplay: {
-    alignItems: 'flex-end',
-  },
-  timeText: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: 'white',
-  },
-  dateText: {
-    fontSize: 14,
-    color: 'rgba(255, 255, 255, 0.8)',
-  },
-  sliderContainer: {
-    height: 96,
-    marginBottom: 24,
-    position: 'relative',
-  },
-  ticksContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    height: '100%',
-  },
-  tickWrapper: {
-    alignItems: 'center',
-  },
-  tick: {
-    width: 1,
-    height: 8,
-    backgroundColor: 'rgba(255, 255, 255, 0.4)',
-    marginBottom: 4,
-  },
-  tickHour: {
-    height: 16,
-  },
-  tickLabel: {
-    fontSize: 14,
-    color: 'rgba(255, 255, 255, 0.7)',
-    fontWeight: '500',
-  },
-  centerIndicator: {
-    position: 'absolute',
-    left: '50%',
-    top: 0,
-    bottom: 0,
-    width: 4,
-    backgroundColor: '#ef4444',
-    borderRadius: 2,
-    transform: [{ translateX: -2 }],
-  },
-  centerDot: {
-    position: 'absolute',
-    top: '50%',
-    left: -8,
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    backgroundColor: '#ef4444',
-    borderWidth: 2,
-    borderColor: 'white',
-    transform: [{ translateY: -10 }],
-  },
-  weekContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  dayButton: {
-    alignItems: 'center',
-    paddingVertical: 8,
-    paddingHorizontal: 8,
-    borderRadius: 8,
-  },
-  dayButtonSelected: {
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-  },
-  dayLabel: {
-    fontSize: 12,
-    color: 'rgba(255, 255, 255, 0.7)',
-    marginBottom: 4,
-  },
-  dayNumber: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: 'rgba(255, 255, 255, 0.8)',
-  },
-  dayNumberSelected: {
-    color: 'white',
-  },
-  calendarButton: {
-    width: 40,
-    height: 40,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderRadius: 8,
-  },
-  swipeActions: {
-    position: 'absolute',
-    right: 16,
-    top: 0,
-    bottom: 0,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  actionButton: {
-    width: 80,
-    height: 80,
-    borderRadius: 16,
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 3.84,
-    elevation: 5,
-  },
-  deleteButton: {
-    backgroundColor: '#ef4444',
-  },
-  pinButton: {
-    backgroundColor: '#3b82f6',
-  },
-  actionButtonText: {
-    color: 'white',
-    fontSize: 14,
-    fontWeight: '500',
-    marginTop: 4,
-  },
-  emptyState: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingVertical: 80,
-  },
-  emptyText: {
-    fontSize: 18,
-    color: '#6b7280',
-    marginTop: 16,
-  },
-  emptySubtext: {
-    fontSize: 14,
-    color: '#4b5563',
-    marginTop: 8,
-  },
-  bottomButtons: {
-    flexDirection: 'row',
-    paddingHorizontal: 20,
-    paddingVertical: 24,
-    gap: 12,
-    backgroundColor: 'rgba(15, 23, 42, 0.95)',
-  },
-  bottomButton: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    backgroundColor: 'rgba(31, 41, 55, 0.6)',
-    paddingVertical: 12,
-    borderRadius: 25,
-  },
-  bottomButtonDisabled: {
-    opacity: 0.5,
-  },
-  bottomButtonText: {
-    color: 'white',
-    fontSize: 16,
-    fontWeight: '500',
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  viewMenu: {
-    backgroundColor: 'rgba(31, 41, 55, 0.95)',
-    borderRadius: 16,
-    minWidth: 200,
-    padding: 8,
-    marginHorizontal: 20,
-  },
-  viewMenuItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  viewMenuButton: {
-    flex: 1,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-  },
-  viewMenuText: {
-    color: '#d1d5db',
-    fontSize: 16,
-  },
-  viewMenuTextActive: {
-    color: '#fb923c',
-    fontWeight: '600',
-  },
-  deleteViewButton: {
-    padding: 12,
-  },
-  viewMenuDivider: {
-    height: 1,
-    backgroundColor: '#374151',
-    marginVertical: 8,
-  },
-  addViewContainer: {
-    padding: 12,
-  },
-  addViewInput: {
-    backgroundColor: '#374151',
-    color: 'white',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 8,
-    fontSize: 14,
-    marginBottom: 8,
-  },
-  addViewButtons: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  addViewButtonConfirm: {
-    flex: 1,
-    backgroundColor: '#3b82f6',
-    paddingVertical: 6,
-    borderRadius: 8,
-    alignItems: 'center',
-  },
-  addViewButtonCancel: {
-    flex: 1,
-    backgroundColor: '#374151',
-    paddingVertical: 6,
-    borderRadius: 8,
-    alignItems: 'center',
-  },
-  addViewButtonText: {
-    color: 'white',
-    fontSize: 14,
-  },
-  addViewMenuItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-  },
-  addViewMenuText: {
-    color: '#3b82f6',
-    fontSize: 16,
-    fontWeight: '500',
-  },
-  locationPopup: {
-    backgroundColor: 'rgba(31, 41, 55, 0.95)',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    maxHeight: SCREEN_HEIGHT * 0.7,
-    width: '100%',
-    position: 'absolute',
-    bottom: 0,
-  },
-  locationPopupHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 24,
-    borderBottomWidth: 1,
-    borderBottomColor: '#374151',
-  },
-  locationPopupTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: 'white',
-  },
-  searchInput: {
-    backgroundColor: 'rgba(55, 65, 81, 0.5)',
-    color: 'white',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    margin: 24,
-    marginTop: 16,
-    borderRadius: 12,
-    fontSize: 16,
-  },
-  locationList: {
-    maxHeight: 400,
-  },
-  locationItem: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 24,
-    paddingVertical: 16,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(55, 65, 81, 0.5)',
-  },
-  locationItemText: {
-    color: 'white',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  locationItemOffset: {
-    color: '#9ca3af',
-    fontSize: 14,
-  },
-  calendarPopup: {
-    backgroundColor: 'rgba(31, 41, 55, 0.95)',
-    borderRadius: 24,
-    padding: 24,
-    maxWidth: 400,
-    width: '90%',
-  },
-  calendarHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 24,
-  },
-  calendarArrow: {
-    padding: 8,
-  },
-  calendarTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: 'white',
-  },
-  calendarGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  calendarDayLabel: {
-    width: `${100 / 7}%`,
-    textAlign: 'center',
-    color: '#9ca3af',
-    fontSize: 14,
-    paddingVertical: 8,
-  },
-  calendarDay: {
-    width: `${100 / 7}%`,
-    aspectRatio: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderRadius: 8,
-  },
-  calendarDaySelected: {
-    backgroundColor: '#3b82f6',
-  },
-  calendarDayText: {
-    color: 'white',
-    fontSize: 14,
-  },
-  calendarDayTextSelected: {
-    fontWeight: 'bold',
-  },
-  calendarDayTextEmpty: {
-    color: 'transparent',
-  },
-});
