@@ -76,14 +76,55 @@ export default function TimeConverterApp() {
   // Which month is shown in the calendar
   const [calendarMonth, setCalendarMonth] = useState(new Date(now.getFullYear(), now.getMonth(), now.getDate()));
 
-  // Stores temporary slider movement before the user lets go
-  const [pendingQuarterChange, setPendingQuarterChange] = useState(0);
+  // Timeline slider constants
+  const TICK_SPACING = 30; // pixels between each 15-min tick
+  const TICKS_PER_DAY = 96; // 24 hours * 4 (15-min intervals)
+  const BUFFER_TICKS = 80; // Buffer on each side for smooth scrolling (2400px buffer)
+  const TICKS_ON_SCREEN = Math.ceil(SCREEN_WIDTH / TICK_SPACING) + (BUFFER_TICKS * 2);
 
-  // Animated value for the horizontal time slider
-  const sliderPosition = useRef(new Animated.Value(0)).current;
+  // Calculate initial center position
+  const initialTimeTick = Math.floor((baseTime * 60 + baseMinutes) / 15);
 
-  // Stores swipe positions for individual rows
-  const swipePositions = useRef({}).current;
+  // Timeline slider animated value - starts at 0, ticks are positioned relative to center
+  const sliderOffset = useRef(new Animated.Value(0)).current;
+  const isTimelineDragging = useRef(false);
+
+  // Initialize ticks with relative positions around center
+  const initializeTicks = () => {
+    const initialTicks = [];
+    const halfTicks = Math.floor(TICKS_ON_SCREEN / 2);
+
+    for (let i = 0; i < TICKS_ON_SCREEN; i++) {
+      const relativeIndex = i - halfTicks;
+      initialTicks.push({
+        id: i, // Fixed ID for React keys
+        tickIndex: initialTimeTick + relativeIndex, // Logical time index
+        x: relativeIndex * TICK_SPACING, // Fixed pixel position (relative to center)
+      });
+    }
+    return initialTicks;
+  };
+
+  const ticksRef = useRef(initializeTicks());
+  const [ticks, setTicks] = useState(ticksRef.current);
+  const forceUpdateTicks = () => setTicks([...ticksRef.current]);
+
+  // Calculate tick display data from tick index
+  const getTickDisplayData = (tickIndex) => {
+    // Wrap to 0-95 range for time calculation
+    let normalizedIndex = tickIndex % TICKS_PER_DAY;
+    if (normalizedIndex < 0) normalizedIndex += TICKS_PER_DAY;
+
+    const totalMinutes = normalizedIndex * 15;
+    const hour = Math.floor(totalMinutes / 60);
+    const minute = totalMinutes % 60;
+    const isHour = minute === 0;
+
+    return { hour, minute, isHour };
+  };
+
+  // Debug state to show recycling info
+  const [debugInfo, setDebugInfo] = useState('');
 
   // Static world city list used for searching and selection
   const worldCities = [
@@ -337,177 +378,75 @@ export default function TimeConverterApp() {
     return 'Same Time';
   };
 
-  // Handles dragging the main timeline slider and updating the base time/date
-  const sliderPanResponder = useRef(
+  // Recycle ticks when they go off-screen
+  const updateTickWindow = () => {
+    const currentOffset = sliderOffset._offset + sliderOffset._value;
+    let recycled = false;
+
+    ticksRef.current.forEach(tick => {
+      const tickPixel = tick.x + currentOffset;
+
+      // Tick went off the left side → recycle to the right
+      if (tickPixel < -TICK_SPACING * BUFFER_TICKS) {
+        recycled = true;
+        tick.tickIndex += TICKS_ON_SCREEN;
+        tick.x += TICKS_ON_SCREEN * TICK_SPACING;
+      }
+      // Tick went off the right side → recycle to the left
+      else if (tickPixel > SCREEN_WIDTH + TICK_SPACING * BUFFER_TICKS) {
+        recycled = true;
+        tick.tickIndex -= TICKS_ON_SCREEN;
+        tick.x -= TICKS_ON_SCREEN * TICK_SPACING;
+      }
+    });
+
+    if (recycled) {
+      forceUpdateTicks();
+      setDebugInfo(`Recycled | Offset: ${Math.round(currentOffset)}`);
+    }
+  };
+
+  // Timeline slider pan responder
+  const timelinePanResponder = useRef(
     PanResponder.create({
-      // Start responding immediately
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: () => true,
+      onStartShouldSetPanResponder: () => false,
+      // Only start responding if there's actual horizontal movement (not vertical)
+      onMoveShouldSetPanResponder: (_, gestureState) => {
+        const isHorizontal = Math.abs(gestureState.dx) > Math.abs(gestureState.dy);
+        const hasMovement = Math.abs(gestureState.dx) > 5;
+        return isHorizontal && hasMovement;
+      },
 
-      // Reset temporary quarter movement on touch start
       onPanResponderGrant: () => {
-        setPendingQuarterChange(0);
+        // Mark that timeline dragging has started
+        isTimelineDragging.current = true;
+        // Extract current animated value and set it as the offset
+        sliderOffset.extractOffset();
       },
 
-      // Convert drag distance → 15-minute increments and preview updated time
       onPanResponderMove: (_, gestureState) => {
-        const deltaX = gestureState.dx;
-        const quarterChange = -Math.round((deltaX / SCREEN_WIDTH) * 48);
-
-        if (quarterChange !== pendingQuarterChange) {
-          setPendingQuarterChange(quarterChange);
-          triggerHaptic(); // haptic feedback on each quarter jump
-        }
-
-        const snappedQuarters = totalQuartersMoved + quarterChange;
-        const referenceDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-
-        const totalMinutes =
-          referenceDate.getHours() * 60 +
-          Math.floor(referenceDate.getMinutes() / 15) * 15 +
-          snappedQuarters * 15;
-
-        let newHour = Math.floor(totalMinutes / 60) % 24;
-        let newMinutes = Math.round((totalMinutes % 60) / 15) * 15;
-
-        if (newMinutes === 60) {
-          newMinutes = 0;
-          newHour = (newHour + 1) % 24;
-        }
-        if (newHour < 0) newHour += 24;
-
-        const daysOffset = Math.floor(totalMinutes / 1440);
-        let newDate = new Date(referenceDate);
-        newDate.setDate(newDate.getDate() + daysOffset);
-
-        setBaseTime(newHour);
-        setBaseMinutes(newMinutes);
-        setBaseDate(newDate);
+        // Smooth pixel-based dragging (dragging right = positive dx, shows earlier times)
+        sliderOffset.setValue(gestureState.dx);
       },
 
-      // Finalize the time change when user releases the drag
       onPanResponderRelease: () => {
-        const targetQuarters = totalQuartersMoved + pendingQuarterChange;
-        setTotalQuartersMoved(targetQuarters);
-
-        const referenceDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-        const totalMinutes =
-          referenceDate.getHours() * 60 +
-          Math.floor(referenceDate.getMinutes() / 15) * 15 +
-          targetQuarters * 15;
-
-        let newHour = Math.floor(totalMinutes / 60) % 24;
-        let newMinutes = Math.round((totalMinutes % 60) / 15) * 15;
-
-        if (newMinutes === 60) {
-          newMinutes = 0;
-          newHour = (newHour + 1) % 24;
-        }
-        if (newHour < 0) newHour += 24;
-
-        const daysOffset = Math.floor(totalMinutes / 1440);
-        let newDate = new Date(referenceDate);
-        newDate.setDate(newDate.getDate() + daysOffset);
-
-        setBaseTime(newHour);
-        setBaseMinutes(newMinutes);
-        setBaseDate(newDate);
-        setPendingQuarterChange(0);
+        // Mark that timeline dragging has ended
+        isTimelineDragging.current = false;
+        // Flatten the offset for next drag
+        sliderOffset.flattenOffset();
+        // Recycle ticks that went off-screen
+        updateTickWindow();
       },
+
+      onPanResponderTerminate: () => {
+        // If another responder takes over, mark dragging as ended
+        isTimelineDragging.current = false;
+      },
+
+      // Prevent ScrollView from taking over while timeline is being dragged
+      onPanResponderTerminationRequest: () => false,
     })
   ).current;
-
-  // Creates a horizontal swipe gesture for each location card (delete/pin)
-  const createSwipePanResponder = (locationId) => {
-    if (!swipePositions[locationId]) {
-      swipePositions[locationId] = new Animated.Value(0);
-    }
-
-    return PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-
-      // Only activate pan when swiping horizontally
-      onMoveShouldSetPanResponder: (_, gestureState) =>
-        Math.abs(gestureState.dx) > 10,
-
-      // Drag left to reveal actions (max -160px)
-      onPanResponderMove: (_, gestureState) => {
-        if (gestureState.dx < 0) {
-          swipePositions[locationId].setValue(Math.max(gestureState.dx, -160));
-        } else if (swipePositions[locationId]._value < 0) {
-          swipePositions[locationId].setValue(
-            Math.min(gestureState.dx + swipePositions[locationId]._value, 0)
-          );
-        }
-      },
-
-      // Snap open or closed depending on swipe distance
-      onPanResponderRelease: (_, gestureState) => {
-        if (gestureState.dx < -80) {
-          Animated.spring(swipePositions[locationId], {
-            toValue: -160,
-            useNativeDriver: true,
-          }).start();
-        } else {
-          Animated.spring(swipePositions[locationId], {
-            toValue: 0,
-            useNativeDriver: true,
-          }).start();
-        }
-      },
-    });
-  };
-
-  // Removes a location and resets swipe animation
-  const deleteLocation = (locationId) => {
-    setSelectedLocations(selectedLocations.filter((loc) => loc.id !== locationId));
-
-    if (swipePositions[locationId]) {
-      Animated.spring(swipePositions[locationId], {
-        toValue: 0,
-        useNativeDriver: true,
-      }).start(() => {
-        swipePositions[locationId].setValue(0);
-      });
-    }
-  };
-
-  // Moves a location to the top (pin) and resets swipe position
-  const pinLocation = (locationId) => {
-    const locationToPin = selectedLocations.find((loc) => loc.id === locationId);
-    const otherLocations = selectedLocations.filter((loc) => loc.id !== locationId);
-    setSelectedLocations([locationToPin, ...otherLocations]);
-
-    if (swipePositions[locationId]) {
-      Animated.spring(swipePositions[locationId], {
-        toValue: 0,
-        useNativeDriver: true,
-      }).start();
-    }
-  };
-
-  // Generates hour/minute tick marks for the slider timeline
-  const renderSliderTicks = () => {
-    const ticks = [];
-    const currentTotalMinutes =
-      baseTime * 60 + baseMinutes + pendingQuarterChange * 15;
-
-    for (let i = -12; i <= 12; i++) {
-      const tickTotalMinutes = currentTotalMinutes + i * 15;
-
-      let adjustedMinutes = tickTotalMinutes % 1440;
-      if (adjustedMinutes < 0) adjustedMinutes += 1440;
-
-      const tickHour = Math.floor(adjustedMinutes / 60);
-      const tickMinute = adjustedMinutes % 60;
-
-      const isHour = tickMinute === 0; // highlight full hours
-
-      ticks.push({ hour: isHour ? tickHour : null, isHour, key: i });
-    }
-
-    return ticks;
-  };
 
   // Generates a 7-day range centered around the selected base date
   const generateWeekDays = () => {
@@ -637,6 +576,7 @@ export default function TimeConverterApp() {
       <ScrollView
         style={styles.scrollContent}
         contentContainerStyle={styles.scrollContentContainer}
+        scrollEnabled={false}
       >
         {selectedLocations.length > 0 ? (
           selectedLocations.map((location, index) => {
@@ -645,20 +585,10 @@ export default function TimeConverterApp() {
             const timeDiff = getTimeDifference(location);
             const gradient = getTimeGradient(hour, minutes);
 
-            if (!swipePositions[location.id]) {
-              swipePositions[location.id] = new Animated.Value(0);
-            }
-
             return (
               <View key={location.id} style={styles.locationContainer}>
                 {/* LOCATION CARD */}
-                <Animated.View
-                  style={[
-                    styles.locationCard,
-                    { transform: [{ translateX: isMain ? 0 : swipePositions[location.id] }] },
-                  ]}
-                  {...(!isMain ? createSwipePanResponder(location.id).panHandlers : {})}
-                >
+                <View style={styles.locationCard}>
                   <LinearGradient
                     colors={gradient}
                     start={{ x: 0, y: 0 }}
@@ -682,22 +612,60 @@ export default function TimeConverterApp() {
                       </View>
                     </View>
 
-                    {/* SLIDER & WEEK SELECTOR (only for main location) */}
+                    {/* TIMELINE SLIDER & WEEK SELECTOR (only for main location) */}
                     {isMain && (
                       <>
-                        {/* Slider */}
-                        <View style={styles.sliderContainer} {...sliderPanResponder.panHandlers}>
-                          <View style={styles.ticksContainer}>
-                            {renderSliderTicks().map((tick) => (
-                              <View key={tick.key} style={styles.tickWrapper}>
-                                <View style={[styles.tick, tick.isHour && styles.tickHour]} />
-                                {tick.isHour && <Text style={styles.tickLabel}>{tick.hour}</Text>}
-                              </View>
-                            ))}
-                          </View>
-                          <View style={styles.centerIndicator}>
-                            <View style={styles.centerDot} />
-                          </View>
+                        {/* Timeline Slider */}
+                        <View style={styles.sliderContainer} {...timelinePanResponder.panHandlers}>
+                          {/* Debug info */}
+                          {debugInfo ? (
+                            <Text style={{ position: 'absolute', top: 0, left: 10, color: 'yellow', fontSize: 10, zIndex: 1000 }}>
+                              {debugInfo}
+                            </Text>
+                          ) : null}
+
+                          {/* Fixed center indicator */}
+                          <View style={styles.centerIndicator} />
+
+                          {/* Animated tick container */}
+                          <Animated.View
+                            style={[
+                              styles.ticksContainer,
+                              {
+                                left: SCREEN_WIDTH / 2, // Position origin at screen center
+                                transform: [{ translateX: sliderOffset }],
+                              },
+                            ]}
+                          >
+                            {ticks.map((tick) => {
+                              const displayData = getTickDisplayData(tick.tickIndex);
+
+                              return (
+                                <View
+                                  key={tick.id}
+                                  style={[
+                                    styles.tickWrapper,
+                                    { left: tick.x } // Use the fixed x position (relative to center)
+                                  ]}
+                                >
+                                  <View
+                                    style={[
+                                      styles.tick,
+                                      displayData.isHour && styles.tickHour
+                                    ]}
+                                  />
+                                  {displayData.isHour && (
+                                    <Text style={styles.tickLabel}>
+                                      {displayData.hour === 0 ? '12am' :
+                                       displayData.hour < 12 ? `${displayData.hour}am` :
+                                       displayData.hour === 12 ? '12pm' :
+                                       `${displayData.hour - 12}pm`}
+                                    </Text>
+                                  )}
+                                </View>
+                              );
+                            })}
+                          </Animated.View>
                         </View>
 
                         {/* Week Days */}
@@ -732,27 +700,7 @@ export default function TimeConverterApp() {
                       </>
                     )}
                   </LinearGradient>
-                </Animated.View>
-
-                {/* SWIPE ACTIONS (only for non-main locations) */}
-                {!isMain && (
-                  <View style={styles.swipeActions}>
-                    <TouchableOpacity
-                      style={[styles.actionButton, styles.deleteButton]}
-                      onPress={() => deleteLocation(location.id)}
-                    >
-                      <Ionicons name="close" size={28} color="white" />
-                      <Text style={styles.actionButtonText}>Delete</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={[styles.actionButton, styles.pinButton]}
-                      onPress={() => pinLocation(location.id)}
-                    >
-                      <Ionicons name="pin" size={28} color="white" />
-                      <Text style={styles.actionButtonText}>Pin</Text>
-                    </TouchableOpacity>
-                  </View>
-                )}
+                </View>
               </View>
             );
           })

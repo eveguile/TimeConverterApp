@@ -103,12 +103,13 @@ const styles = StyleSheet.create({
     position: 'relative',
   },
   ticksContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+    position: 'relative',
     height: '100%',
+    width: '100%',
   },
   tickWrapper: {
-    alignItems: 'center',
+    position: 'absolute',
+    alignItems: 'flex-start',
   },
   tick: {
     width: 1,
@@ -120,9 +121,14 @@ const styles = StyleSheet.create({
     height: 16,
   },
   tickLabel: {
+    position: 'absolute',
+    top: 20,
+    left: -50,
     fontSize: 14,
     color: 'rgba(255, 255, 255, 0.7)',
     fontWeight: '500',
+    width: 100,
+    textAlign: 'center',
   },
   centerIndicator: {
     position: 'absolute',
