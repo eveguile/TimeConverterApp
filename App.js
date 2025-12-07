@@ -812,36 +812,40 @@ export default function TimeConverterApp() {
                 <Ionicons name="chevron-forward" size={24} color="white" />
               </TouchableOpacity>
             </View>
-            <View style={styles.calendarGrid}>
-              {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => (
-                <Text key={day} style={styles.calendarDayLabel}>{day}</Text>
-              ))}
-              {generateCalendarDays().map((day, idx) => (
-                <TouchableOpacity
-                  key={idx}
-                  style={[
-                    styles.calendarDay,
-                    day && day.toDateString() === baseDate.toDateString() && styles.calendarDaySelected,
-                  ]}
-                  onPress={() => {
-                    if (day) {
-                      setBaseDate(day);
-                      setShowCalendar(false);
-                    }
-                  }}
-                  disabled={!day}
-                >
-                  <Text
+            <View>
+              <View style={styles.calendarDayLabelsRow}>
+                {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => (
+                  <Text key={day} style={styles.calendarDayLabel}>{day}</Text>
+                ))}
+              </View>
+              <View style={styles.calendarGrid}>
+                {generateCalendarDays().map((day, idx) => (
+                  <TouchableOpacity
+                    key={idx}
                     style={[
-                      styles.calendarDayText,
-                      day && day.toDateString() === baseDate.toDateString() && styles.calendarDayTextSelected,
-                      !day && styles.calendarDayTextEmpty,
+                      styles.calendarDay,
+                      day && day.toDateString() === baseDate.toDateString() && styles.calendarDaySelected,
                     ]}
+                    onPress={() => {
+                      if (day) {
+                        setBaseDate(day);
+                        setShowCalendar(false);
+                      }
+                    }}
+                    disabled={!day}
                   >
-                    {day ? day.getDate() : ''}
-                  </Text>
-                </TouchableOpacity>
-              ))}
+                    <Text
+                      style={[
+                        styles.calendarDayText,
+                        day && day.toDateString() === baseDate.toDateString() && styles.calendarDayTextSelected,
+                        !day && styles.calendarDayTextEmpty,
+                      ]}
+                    >
+                      {day ? day.getDate() : ''}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
             </View>
           </TouchableOpacity>
         </TouchableOpacity>
@@ -1245,6 +1249,7 @@ const styles = StyleSheet.create({
     padding: 24,
     maxWidth: 400,
     width: '90%',
+    height: 430,
   },
   calendarHeader: {
     flexDirection: 'row',
@@ -1260,10 +1265,14 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: 'white',
   },
+  calendarDayLabelsRow: {
+    flexDirection: 'row',
+    marginBottom: 8,
+  },
   calendarGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 8,
+    rowGap: 8,
   },
   calendarDayLabel: {
     width: `${100 / 7}%`,
@@ -1277,10 +1286,12 @@ const styles = StyleSheet.create({
     aspectRatio: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    borderRadius: 8,
+    padding: 8,
   },
   calendarDaySelected: {
     backgroundColor: '#3b82f6',
+    borderRadius: 8,
+    padding: 0,
   },
   calendarDayText: {
     color: 'white',
