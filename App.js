@@ -48,6 +48,8 @@ export default function TimeConverterApp() {
   const [showCalendar, setShowCalendar] = useState(false);
   const [calendarMonth, setCalendarMonth] = useState(new Date(now.getFullYear(), now.getMonth(), now.getDate()));
   const [pendingQuarterChange, setPendingQuarterChange] = useState(0);
+  const [showMonthPicker, setShowMonthPicker] = useState(false);
+  const [pickerYear, setPickerYear] = useState(now.getFullYear());
 
   const sliderPosition = useRef(new Animated.Value(0)).current;
   const swipePositions = useRef({}).current;
@@ -446,11 +448,19 @@ export default function TimeConverterApp() {
   };
 
   const handlePrevMonth = () => {
-    setCalendarMonth(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() - 1, 1));
+    if (showMonthPicker) {
+      setPickerYear(pickerYear - 1);
+    } else {
+      setCalendarMonth(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() - 1, 1));
+    }
   };
 
   const handleNextMonth = () => {
-    setCalendarMonth(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 1));
+    if (showMonthPicker) {
+      setPickerYear(pickerYear + 1);
+    } else {
+      setCalendarMonth(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 1));
+    }
   };
 
   const handleAddToCalendar = async () => {
@@ -805,48 +815,76 @@ export default function TimeConverterApp() {
               <TouchableOpacity onPress={handlePrevMonth} style={styles.calendarArrow}>
                 <Ionicons name="chevron-back" size={24} color="white" />
               </TouchableOpacity>
-              <Text style={styles.calendarTitle}>
-                {calendarMonth.toLocaleString('default', { month: 'long', year: 'numeric' })}
-              </Text>
+              <TouchableOpacity onPress={() => {
+                if (!showMonthPicker) {
+                  setPickerYear(calendarMonth.getFullYear());
+                }
+                setShowMonthPicker(!showMonthPicker);
+              }}>
+                <Text style={styles.calendarTitle}>
+                  {showMonthPicker
+                    ? pickerYear
+                    : calendarMonth.toLocaleString('default', { month: 'long', year: 'numeric' })}
+                </Text>
+              </TouchableOpacity>
               <TouchableOpacity onPress={handleNextMonth} style={styles.calendarArrow}>
                 <Ionicons name="chevron-forward" size={24} color="white" />
               </TouchableOpacity>
             </View>
-            <View>
-              <View style={styles.calendarDayLabelsRow}>
-                {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => (
-                  <Text key={day} style={styles.calendarDayLabel}>{day}</Text>
-                ))}
-              </View>
-              <View style={styles.calendarGrid}>
-                {generateCalendarDays().map((day, idx) => (
+            {showMonthPicker ? (
+              <View style={styles.monthGrid}>
+                {['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'].map((month, idx) => (
                   <TouchableOpacity
-                    key={idx}
-                    style={[
-                      styles.calendarDay,
-                      day && day.toDateString() === baseDate.toDateString() && styles.calendarDaySelected,
-                    ]}
+                    key={month}
+                    style={styles.monthButton}
                     onPress={() => {
-                      if (day) {
-                        setBaseDate(day);
-                        setShowCalendar(false);
-                      }
+                      setCalendarMonth(new Date(pickerYear, idx, 1));
+                      setShowMonthPicker(false);
                     }}
-                    disabled={!day}
                   >
-                    <Text
-                      style={[
-                        styles.calendarDayText,
-                        day && day.toDateString() === baseDate.toDateString() && styles.calendarDayTextSelected,
-                        !day && styles.calendarDayTextEmpty,
-                      ]}
-                    >
-                      {day ? day.getDate() : ''}
+                    <Text style={styles.monthButtonText}>
+                      {month.substring(0, 3)}
                     </Text>
                   </TouchableOpacity>
                 ))}
               </View>
-            </View>
+            ) : (
+              <View>
+                <View style={styles.calendarDayLabelsRow}>
+                  {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => (
+                    <Text key={day} style={styles.calendarDayLabel}>{day}</Text>
+                  ))}
+                </View>
+                <View style={styles.calendarGrid}>
+                  {generateCalendarDays().map((day, idx) => (
+                    <TouchableOpacity
+                      key={idx}
+                      style={[
+                        styles.calendarDay,
+                        day && day.toDateString() === baseDate.toDateString() && styles.calendarDaySelected,
+                      ]}
+                      onPress={() => {
+                        if (day) {
+                          setBaseDate(day);
+                          setShowCalendar(false);
+                        }
+                      }}
+                      disabled={!day}
+                    >
+                      <Text
+                        style={[
+                          styles.calendarDayText,
+                          day && day.toDateString() === baseDate.toDateString() && styles.calendarDayTextSelected,
+                          !day && styles.calendarDayTextEmpty,
+                        ]}
+                      >
+                        {day ? day.getDate() : ''}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+            )}
           </TouchableOpacity>
         </TouchableOpacity>
       </Modal>
@@ -1249,7 +1287,7 @@ const styles = StyleSheet.create({
     padding: 24,
     maxWidth: 400,
     width: '90%',
-    height: 430,
+    height: 450,
   },
   calendarHeader: {
     flexDirection: 'row',
@@ -1302,5 +1340,21 @@ const styles = StyleSheet.create({
   },
   calendarDayTextEmpty: {
     color: 'transparent',
+  },
+  monthGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    rowGap: 12,
+  },
+  monthButton: {
+    width: `${100 / 3}%`,
+    paddingVertical: 16,
+    alignItems: 'center',
+    borderRadius: 8,
+  },
+  monthButtonText: {
+    color: 'rgba(255, 255, 255, 0.8)',
+    fontSize: 16,
+    fontWeight: '500',
   },
 });
