@@ -99,7 +99,8 @@ const styles = StyleSheet.create({
   },
   sliderContainer: {
     height: 96,
-    marginBottom: 24,
+    marginTop: 12,
+    marginBottom: 0,
     position: 'relative',
   },
   ticksContainer: {
@@ -133,12 +134,12 @@ const styles = StyleSheet.create({
   centerIndicator: {
     position: 'absolute',
     left: '50%',
-    top: 0,
-    bottom: 0,
-    width: 4,
+    top: '20%',
+    width: 3,
+    height: 50,
     backgroundColor: '#ef4444',
     borderRadius: 2,
-    transform: [{ translateX: -2 }],
+    transform: [{ translateX: -1.5 }, { translateY: -20 }],
   },
   centerDot: {
     position: 'absolute',

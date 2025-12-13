@@ -35,8 +35,8 @@ export default function TimeConverterApp() {
   const [viewStates, setViewStates] = useState(() => ({
     Default: {
       locations: [],
-      time: now.getHours(),
-      minutes: Math.floor(now.getMinutes() / 15) * 15, // round to nearest 15 min
+      time: now.getHours(), // Initialize to current time
+      minutes: now.getMinutes(),
       date: new Date(now.getFullYear(), now.getMonth(), now.getDate())
     }
   }));
@@ -63,12 +63,10 @@ export default function TimeConverterApp() {
   const [selectedLocations, setSelectedLocations] = useState([]);
 
   // The base time the whole view is calculated from
+  // Initialize to current time for location cards (slider starts at 12:00am independently)
   const [baseTime, setBaseTime] = useState(now.getHours());
-  const [baseMinutes, setBaseMinutes] = useState(Math.floor(now.getMinutes() / 15) * 15);
+  const [baseMinutes, setBaseMinutes] = useState(now.getMinutes());
   const [baseDate, setBaseDate] = useState(new Date(now.getFullYear(), now.getMonth(), now.getDate()));
-
-  // Tracks how much the user moved the time slider (1 unit = 15 minutes)
-  const [totalQuartersMoved, setTotalQuartersMoved] = useState(0);
 
   // Calendar popup visibility
   const [showCalendar, setShowCalendar] = useState(false);
@@ -77,40 +75,66 @@ export default function TimeConverterApp() {
   const [calendarMonth, setCalendarMonth] = useState(new Date(now.getFullYear(), now.getMonth(), now.getDate()));
 
   // Timeline slider constants
-  const TICK_SPACING = 30; // pixels between each 15-min tick
-  const TICKS_PER_DAY = 96; // 24 hours * 4 (15-min intervals)
-  const BUFFER_TICKS = 80; // Buffer on each side for smooth scrolling (2400px buffer)
-  const TICKS_ON_SCREEN = Math.ceil(SCREEN_WIDTH / TICK_SPACING) + (BUFFER_TICKS * 2);
+  const TICKS_PER_DAY = 96; // 24 hours * 4 (15-min intervals) - 00:00 to 23:45
+  const TOTAL_TICKS = 97; // Include tick 96 for 24:00 (00:00 next day)
+  const TICK_SPACING = 30; // Fixed 30px spacing - readable on all screen sizes
 
-  // Calculate initial center position
-  const initialTimeTick = Math.floor((baseTime * 60 + baseMinutes) / 15);
+  // Container padding constants (must match styles.js)
+  const SCROLL_PADDING = 20; // styles.scrollContent.paddingHorizontal
+  const GRADIENT_PADDING = 24; // styles.gradient.padding
+  const TOTAL_HORIZONTAL_PADDING = SCROLL_PADDING + GRADIENT_PADDING; // 44px on each side
 
-  // Timeline slider animated value - starts at 0, ticks are positioned relative to center
-  const sliderOffset = useRef(new Animated.Value(0)).current;
-  const isTimelineDragging = useRef(false);
+  // Timeline dimensions - ticks are positioned within sliderContainer
+  const TIMELINE_WIDTH = SCREEN_WIDTH - (TOTAL_HORIZONTAL_PADDING * 2); // SCREEN_WIDTH - 88
+  const TIMELINE_CENTER = TIMELINE_WIDTH / 2; // Center from sliderContainer's left edge
 
-  // Initialize ticks with relative positions around center
+  // Initialize ticks with all 97 ticks (00:00 to 24:00)
   const initializeTicks = () => {
-    const initialTicks = [];
-    const halfTicks = Math.floor(TICKS_ON_SCREEN / 2);
-
-    for (let i = 0; i < TICKS_ON_SCREEN; i++) {
-      const relativeIndex = i - halfTicks;
-      initialTicks.push({
-        id: i, // Fixed ID for React keys
-        tickIndex: initialTimeTick + relativeIndex, // Logical time index
-        x: relativeIndex * TICK_SPACING, // Fixed pixel position (relative to center)
+    const ticks = [];
+    for (let tickIndex = 0; tickIndex < TOTAL_TICKS; tickIndex++) {
+      ticks.push({
+        id: tickIndex,
+        tickIndex: tickIndex,
+        x: tickIndex * TICK_SPACING
       });
     }
-    return initialTicks;
+    return ticks;
   };
 
+  // Timeline slider animated value
+  // Formula: To center tick N, offset = TIMELINE_CENTER - (N * TICK_SPACING)
+  // Initialize to current time
+  const sliderOffset = useRef(
+    new Animated.Value((() => {
+      const totalMinutes = now.getHours() * 60 + now.getMinutes();
+      const exactTickPosition = totalMinutes / 15;
+      const tickPixelPosition = exactTickPosition * TICK_SPACING;
+      return TIMELINE_CENTER - tickPixelPosition;
+    })())
+  ).current;
+  const isTimelineDragging = useRef(false);
+  const lastQuarterRef = useRef(null); // Track quarter crossings for haptics
+  const isFirstMount = useRef(true); // Skip view-loading effect on first render
+  // Track current tick position (0-96) - initialize to current time rounded to nearest quarter
+  const currentTickRef = useRef(Math.round((now.getHours() * 60 + now.getMinutes()) / 15));
+  // Track velocity for momentum scrolling
+  const velocityRef = useRef({ vx: 0, time: 0 });
+
   const ticksRef = useRef(initializeTicks());
-  const [ticks, setTicks] = useState(ticksRef.current);
-  const forceUpdateTicks = () => setTicks([...ticksRef.current]);
+  const ticks = ticksRef.current; // No need for state - ticks are now static (all 97 ticks)
+
+  // Single source of truth for slider offset
+  // Returns the actual rendered offset that drives the transform
+  const getTotalOffset = () => sliderOffset._value + sliderOffset._offset;
+
 
   // Calculate tick display data from tick index
   const getTickDisplayData = (tickIndex) => {
+    // Tick 96 represents 24:00 (displayed as 12am of next day)
+    if (tickIndex === 96) {
+      return { hour: 0, minute: 0, isHour: true };
+    }
+
     // Wrap to 0-95 range for time calculation
     let normalizedIndex = tickIndex % TICKS_PER_DAY;
     if (normalizedIndex < 0) normalizedIndex += TICKS_PER_DAY;
@@ -123,8 +147,7 @@ export default function TimeConverterApp() {
     return { hour, minute, isHour };
   };
 
-  // Debug state to show recycling info
-  const [debugInfo, setDebugInfo] = useState('');
+  // Removed: debugInfo state - no longer needed (infinite scrolling removed)
 
   // Static world city list used for searching and selection
   const worldCities = [
@@ -263,19 +286,27 @@ export default function TimeConverterApp() {
       locationDate.setDate(locationDate.getDate() - 1);
     }
 
-    // Round to nearest quarter hour
-    const roundedMinutes = Math.floor(locationMinutes / 15) * 15;
-
-    // Compute how many 15-minute steps away from reference we are
-    const quartersDiff = Math.floor((locationHour * 60 + roundedMinutes - (20 * 60)) / 15);
-
-    const referenceDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const daysDiff = Math.floor((locationDate - referenceDate) / (1000 * 60 * 60 * 24));
-
+    // Update state with exact time (not rounded to quarter)
     setBaseTime(locationHour);
-    setBaseMinutes(roundedMinutes);
+    setBaseMinutes(locationMinutes);
     setBaseDate(new Date(locationDate.getFullYear(), locationDate.getMonth(), locationDate.getDate()));
-    setTotalQuartersMoved(quartersDiff + daysDiff * 96);
+
+    // Calculate offset to center this time
+    // Formula: offset = TIMELINE_CENTER - (tickPosition * TICK_SPACING)
+    const totalMinutesExact = locationHour * 60 + locationMinutes;
+    const exactTickPosition = totalMinutesExact / 15; // Can be fractional
+    const targetOffset = TIMELINE_CENTER - (exactTickPosition * TICK_SPACING);
+
+    // IMPORTANT: After flattenOffset(), _offset holds absolute position.
+    // All future animations must use relative toValue (target - _offset)
+    sliderOffset.flattenOffset();
+    const relativeOffset = targetOffset - sliderOffset._offset;
+    Animated.spring(sliderOffset, {
+      toValue: relativeOffset,
+      useNativeDriver: true,
+      tension: 100,
+      friction: 10
+    }).start();
   };
 
   // Switches to a different saved view
@@ -286,6 +317,12 @@ export default function TimeConverterApp() {
 
   // Whenever the active view changes, load its saved state
   useEffect(() => {
+    // Skip on first mount - initial offset already correctly set
+    if (isFirstMount.current) {
+      isFirstMount.current = false;
+      return;
+    }
+
     const currentState = viewStates[currentView];
 
     setSelectedLocations(currentState.locations);
@@ -294,14 +331,25 @@ export default function TimeConverterApp() {
     setBaseDate(currentState.date);
     setCalendarMonth(currentState.date);
 
+    // Animate slider to loaded time position
+    // Formula: offset = TIMELINE_CENTER - (tickPosition * TICK_SPACING)
     const totalMinutes = currentState.time * 60 + (currentState.minutes || 0);
-    const referenceDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const daysDiff = Math.floor((currentState.date - referenceDate) / (1000 * 60 * 60 * 24));
+    const exactTickPosition = totalMinutes / 15;
+    const targetOffset = TIMELINE_CENTER - (exactTickPosition * TICK_SPACING);
 
-    setTotalQuartersMoved(Math.floor((totalMinutes - 20 * 60) / 15) + daysDiff * 96);
+    // IMPORTANT: After flattenOffset(), _offset holds absolute position.
+    // All future animations must use relative toValue (target - _offset)
+    sliderOffset.flattenOffset();
+    const relativeOffset = targetOffset - sliderOffset._offset;
+    Animated.spring(sliderOffset, {
+      toValue: relativeOffset,
+      useNativeDriver: true,
+      tension: 100,
+      friction: 10
+    }).start();
   }, [currentView]);
 
-  // Save current view’s state whenever time or locations change
+  // Save current view's state whenever time or locations change
   useEffect(() => {
     setViewStates(prev => ({
       ...prev,
@@ -317,7 +365,42 @@ export default function TimeConverterApp() {
   // Adds a new city to the selected list
   const handleLocationSelect = (location) => {
     if (!selectedLocations.find(loc => loc.city === location.city)) {
-      setSelectedLocations([...selectedLocations, { ...location, id: Date.now() }]);
+      const newLocation = { ...location, id: Date.now() };
+
+      // If this is the first location, initialize time to the location's current time
+      if (selectedLocations.length === 0) {
+        const now = new Date();
+        // Calculate the location's current time using UTC offset
+        const utcTime = now.getTime() + (now.getTimezoneOffset() * 60000); // Convert to UTC
+        const locationTime = new Date(utcTime + (location.utcOffset * 3600000)); // Apply location's offset
+
+        const locationHour = locationTime.getHours();
+        const locationMinutes = locationTime.getMinutes();
+
+        // Update base time to location's current time
+        setBaseTime(locationHour);
+        setBaseMinutes(locationMinutes);
+
+        // Update currentTickRef to match the new time
+        const currentTick = Math.round((locationHour * 60 + locationMinutes) / 15);
+        currentTickRef.current = currentTick;
+
+        // Animate timeline to location's current time
+        const totalMinutesExact = locationHour * 60 + locationMinutes;
+        const exactTickPosition = totalMinutesExact / 15;
+        const targetOffset = TIMELINE_CENTER - (exactTickPosition * TICK_SPACING);
+
+        sliderOffset.flattenOffset();
+        const relativeOffset = targetOffset - sliderOffset._offset;
+        Animated.spring(sliderOffset, {
+          toValue: relativeOffset,
+          useNativeDriver: true,
+          tension: 100,
+          friction: 10
+        }).start();
+      }
+
+      setSelectedLocations([...selectedLocations, newLocation]);
     }
     setShowLocationPopup(false);
     setSearchQuery('');
@@ -335,7 +418,12 @@ export default function TimeConverterApp() {
     let totalMinutes = baseTime * 60 + baseMinutes + timeDiffMinutes;
     let date = new Date(baseDate);
 
-    // Adjust for next/previous day if needed
+    // If at tick 96 (24:00), advance date by one day
+    if (currentTickRef.current === 96) {
+      date.setDate(date.getDate() + 1);
+    }
+
+    // Adjust for next/previous day if needed (timezone differences)
     while (totalMinutes >= 1440) {
       totalMinutes -= 1440;
       date.setDate(date.getDate() + 1);
@@ -378,33 +466,7 @@ export default function TimeConverterApp() {
     return 'Same Time';
   };
 
-  // Recycle ticks when they go off-screen
-  const updateTickWindow = () => {
-    const currentOffset = sliderOffset._offset + sliderOffset._value;
-    let recycled = false;
-
-    ticksRef.current.forEach(tick => {
-      const tickPixel = tick.x + currentOffset;
-
-      // Tick went off the left side → recycle to the right
-      if (tickPixel < -TICK_SPACING * BUFFER_TICKS) {
-        recycled = true;
-        tick.tickIndex += TICKS_ON_SCREEN;
-        tick.x += TICKS_ON_SCREEN * TICK_SPACING;
-      }
-      // Tick went off the right side → recycle to the left
-      else if (tickPixel > SCREEN_WIDTH + TICK_SPACING * BUFFER_TICKS) {
-        recycled = true;
-        tick.tickIndex -= TICKS_ON_SCREEN;
-        tick.x -= TICKS_ON_SCREEN * TICK_SPACING;
-      }
-    });
-
-    if (recycled) {
-      forceUpdateTicks();
-      setDebugInfo(`Recycled | Offset: ${Math.round(currentOffset)}`);
-    }
-  };
+  // Removed: updateTickWindow() - no longer needed, timeline is now finite (no infinite scrolling)
 
   // Timeline slider pan responder
   const timelinePanResponder = useRef(
@@ -425,17 +487,132 @@ export default function TimeConverterApp() {
       },
 
       onPanResponderMove: (_, gestureState) => {
-        // Smooth pixel-based dragging (dragging right = positive dx, shows earlier times)
-        sliderOffset.setValue(gestureState.dx);
+        let newOffset = gestureState.dx;
+        const proposedOffset = sliderOffset._offset + newOffset;
+
+        // Track velocity for momentum scrolling
+        velocityRef.current = {
+          vx: gestureState.vx,
+          time: Date.now()
+        };
+
+        // Boundary constraints: offset to center tick 0 and tick 96 (24:00)
+        const maxOffset = TIMELINE_CENTER; // tick 0 at center
+        const minOffset = TIMELINE_CENTER - ((TOTAL_TICKS - 1) * TICK_SPACING); // tick 96 at center
+        const overscrollResistance = 0.3;
+
+        let clampedOffset = proposedOffset;
+        if (proposedOffset > maxOffset) {
+          const overscroll = proposedOffset - maxOffset;
+          clampedOffset = maxOffset + (overscroll * overscrollResistance);
+        } else if (proposedOffset < minOffset) {
+          const overscroll = minOffset - proposedOffset;
+          clampedOffset = minOffset - (overscroll * overscrollResistance);
+        }
+
+        sliderOffset.setValue(clampedOffset - sliderOffset._offset);
+
+        // Calculate tick at center from single source of truth
+        const totalOffset = getTotalOffset();
+        const exactTickPosition = (TIMELINE_CENTER - totalOffset) / TICK_SPACING;
+
+        // Round to nearest 15-minute interval for display (0-96, where 96 is 24:00)
+        const nearestQuarter = Math.round(exactTickPosition);
+        const clampedQuarter = Math.max(0, Math.min(TOTAL_TICKS - 1, nearestQuarter));
+
+        // Only update time and trigger haptic when nearest tick changes
+        if (clampedQuarter !== lastQuarterRef.current) {
+          // Track current tick position
+          currentTickRef.current = clampedQuarter;
+
+          // Handle tick 96 (24:00 = 00:00 next day) - only update time, date handled in calculateTimeForLocation
+          if (clampedQuarter === 96) {
+            setBaseTime(0);
+            setBaseMinutes(0);
+          } else {
+            const totalMinutesRounded = clampedQuarter * 15;
+            const newHour = Math.floor(totalMinutesRounded / 60) % 24;
+            const newMinute = totalMinutesRounded % 60;
+
+            setBaseTime(newHour);
+            setBaseMinutes(newMinute);
+          }
+
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          lastQuarterRef.current = clampedQuarter;
+        }
       },
 
       onPanResponderRelease: () => {
-        // Mark that timeline dragging has ended
         isTimelineDragging.current = false;
-        // Flatten the offset for next drag
+
+        const totalOffset = sliderOffset._offset + sliderOffset._value;
+
+        // Apply momentum if velocity is significant
+        const velocity = velocityRef.current.vx;
+        const minVelocity = 0.5; // Minimum velocity to trigger momentum
+        const momentumMultiplier = 300; // How far momentum carries
+
+        let momentumOffset = 0;
+        if (Math.abs(velocity) > minVelocity) {
+          momentumOffset = velocity * momentumMultiplier;
+        }
+
+        // Calculate target position with momentum
+        const targetOffset = totalOffset + momentumOffset;
+        const exactTickPosition = (TIMELINE_CENTER - targetOffset) / TICK_SPACING;
+        const nearestQuarter = Math.round(exactTickPosition);
+        const clampedQuarter = Math.max(0, Math.min(TOTAL_TICKS - 1, nearestQuarter));
+
+        // Calculate offset to center this tick: offset = TIMELINE_CENTER - (tick * TICK_SPACING)
+        let finalOffset = TIMELINE_CENTER - (clampedQuarter * TICK_SPACING);
+
+        // IMPORTANT: After flattenOffset(), _offset holds absolute position.
+        // All future animations must use relative toValue (target - _offset)
         sliderOffset.flattenOffset();
-        // Recycle ticks that went off-screen
-        updateTickWindow();
+        const relativeOffset = finalOffset - sliderOffset._offset;
+
+        // Use decay animation for momentum effect, then spring to snap
+        if (Math.abs(velocity) > minVelocity) {
+          Animated.sequence([
+            Animated.decay(sliderOffset, {
+              velocity: velocity,
+              deceleration: 0.997,
+              useNativeDriver: true,
+            }),
+            Animated.spring(sliderOffset, {
+              toValue: relativeOffset,
+              useNativeDriver: true,
+              tension: 100,
+              friction: 10
+            })
+          ]).start();
+        } else {
+          Animated.spring(sliderOffset, {
+            toValue: relativeOffset,
+            useNativeDriver: true,
+            tension: 100,
+            friction: 10
+          }).start();
+        }
+
+        // Track current tick position
+        currentTickRef.current = clampedQuarter;
+
+        // Update time - handle tick 96 (24:00 = 00:00 next day) - date handled in calculateTimeForLocation
+        if (clampedQuarter === 96) {
+          setBaseTime(0);
+          setBaseMinutes(0);
+        } else {
+          const snappedMinutes = clampedQuarter * 15;
+          const snappedHour = Math.floor(snappedMinutes / 60) % 24;
+          const snappedMinute = snappedMinutes % 60;
+
+          setBaseTime(snappedHour);
+          setBaseMinutes(snappedMinute);
+        }
+
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       },
 
       onPanResponderTerminate: () => {
@@ -451,8 +628,14 @@ export default function TimeConverterApp() {
   // Generates a 7-day range centered around the selected base date
   const generateWeekDays = () => {
     const days = [];
-    const startDate = new Date(baseDate);
-    startDate.setDate(baseDate.getDate() - 3);
+    // If at tick 96 (24:00), use next day as base
+    const effectiveBaseDate = new Date(baseDate);
+    if (currentTickRef.current === 96) {
+      effectiveBaseDate.setDate(effectiveBaseDate.getDate() + 1);
+    }
+
+    const startDate = new Date(effectiveBaseDate);
+    startDate.setDate(effectiveBaseDate.getDate() - 3);
 
     for (let i = 0; i < 7; i++) {
       const day = new Date(startDate);
@@ -617,13 +800,6 @@ export default function TimeConverterApp() {
                       <>
                         {/* Timeline Slider */}
                         <View style={styles.sliderContainer} {...timelinePanResponder.panHandlers}>
-                          {/* Debug info */}
-                          {debugInfo ? (
-                            <Text style={{ position: 'absolute', top: 0, left: 10, color: 'yellow', fontSize: 10, zIndex: 1000 }}>
-                              {debugInfo}
-                            </Text>
-                          ) : null}
-
                           {/* Fixed center indicator */}
                           <View style={styles.centerIndicator} />
 
@@ -632,7 +808,8 @@ export default function TimeConverterApp() {
                             style={[
                               styles.ticksContainer,
                               {
-                                left: SCREEN_WIDTH / 2, // Position origin at screen center
+                                position: 'absolute',
+                                left: 0,
                                 transform: [{ translateX: sliderOffset }],
                               },
                             ]}
@@ -645,7 +822,7 @@ export default function TimeConverterApp() {
                                   key={tick.id}
                                   style={[
                                     styles.tickWrapper,
-                                    { left: tick.x } // Use the fixed x position (relative to center)
+                                    { left: tick.x }
                                   ]}
                                 >
                                   <View
@@ -657,9 +834,9 @@ export default function TimeConverterApp() {
                                   {displayData.isHour && (
                                     <Text style={styles.tickLabel}>
                                       {displayData.hour === 0 ? '12am' :
-                                       displayData.hour < 12 ? `${displayData.hour}am` :
-                                       displayData.hour === 12 ? '12pm' :
-                                       `${displayData.hour - 12}pm`}
+                                        displayData.hour < 12 ? `${displayData.hour}am` :
+                                          displayData.hour === 12 ? '12pm' :
+                                            `${displayData.hour - 12}pm`}
                                     </Text>
                                   )}
                                 </View>
@@ -671,7 +848,12 @@ export default function TimeConverterApp() {
                         {/* Week Days */}
                         <View style={styles.weekContainer}>
                           {generateWeekDays().map((day, idx) => {
-                            const isSelected = day.toDateString() === baseDate.toDateString();
+                            // If at tick 96, compare with next day
+                            const effectiveBaseDate = new Date(baseDate);
+                            if (currentTickRef.current === 96) {
+                              effectiveBaseDate.setDate(effectiveBaseDate.getDate() + 1);
+                            }
+                            const isSelected = day.toDateString() === effectiveBaseDate.toDateString();
                             const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
                             return (
                               <TouchableOpacity
