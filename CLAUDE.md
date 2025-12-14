@@ -72,13 +72,19 @@ Uses **19 useState hooks** with no external state management library:
 
 ### Critical Implementation Details
 
-**Time Slider Mechanics (lines 277-338):**
-- Tracks horizontal pan gestures via PanResponder
-- Converts pixels to "quarters" (15-minute intervals): `deltaX / 20`
-- Updates `baseTime`, `baseMinutes`, and `baseDate` in real-time
-- Handles day rollover when time goes past midnight or before start
-- Triggers haptic feedback on each quarter change
-- Total movement tracked in `totalQuartersMoved` for position consistency
+**Time Slider Mechanics (lines 77-550):**
+- **97 ticks total** (00:00 to 24:00): Includes tick 96 for midnight of next day
+- **Container-aware positioning**: Accounts for 88px total padding (20px ScrollView + 24px Gradient on each side)
+- **TIMELINE_CENTER calculation**: Uses `(SCREEN_WIDTH - 88) / 2` for accurate tick alignment
+- **Exact time alignment**: Current time centered precisely (supports fractional positioning like 14:37)
+- **Live time updates**: Dragging updates `baseTime` and `baseMinutes` to nearest 15-min interval
+- **Snap-to-quarter**: Releases animate to nearest 15-minute marker with spring animation
+- **Momentum scrolling**: Velocity-based deceleration with decay animation, then snap
+- **Haptic feedback**: Light haptic every 15-min crossing during drag, medium haptic on snap
+- **Overscroll behavior**: Allows slight overscroll with 0.3x resistance, bounces back on release
+- **40px center indicator**: Red vertical bar at timeline center (50px height, positioned at 20% from top)
+- **"Current Time" button**: Animates slider to exact current minute (e.g., 14:37, not rounded to 14:30)
+- **First location initialization**: When first location is added, timeline initializes to that location's current time
 
 **Swipe-to-Delete/Pin (lines 340-383):**
 - Each location has its own swipe handler and animated position
@@ -88,10 +94,14 @@ Uses **19 useState hooks** with no external state management library:
 - Pinning moves location to index 0 (becomes new reference time)
 
 **Date Handling:**
-- Week selector shows 7 days centered on `baseDate` (lines 415-427)
+- **Tick 96 date advancement**: When timeline is at 24:00 (tick 96), dates automatically show next day
+- **Dynamic date calculation**: `calculateTimeForLocation` adds 1 day when `currentTickRef.current === 96`
+- Week selector shows 7 days centered on `baseDate` (lines 552-571)
+- `generateWeekDays()` uses next day as base when at tick 96
+- Week day highlighting updates to show next day when at tick 96
 - Calendar uses separate `calendarMonth` state for navigation
 - Date selection updates `baseDate` which recalculates all location times
-- generateCalendarDays() creates month grid with empty cells for alignment
+- `generateCalendarDays()` creates month grid with empty cells for alignment
 
 ### Platform Configuration
 
