@@ -1,5 +1,7 @@
 // App.js
 import React, { useState, useEffect, useRef } from 'react';
+
+// Core React Native UI components
 import {
   View,
   Text,
@@ -13,71 +15,155 @@ import {
   Linking,
   Alert,
 } from 'react-native';
+
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import * as Calendar from 'expo-calendar';
-import styles from './styles';
+import styles, { SCREEN_WIDTH, SCREEN_HEIGHT } from './styles';
 
+// Main app component
 export default function TimeConverterApp() {
+
+  // Controls visibility of the drop-down view menu
   const [showViewMenu, setShowViewMenu] = useState(false);
+
+  // The active user-created view (e.g. "Default", "Work", etc.)
   const [currentView, setCurrentView] = useState('Default');
-  const [showSettingsMenu, setShowSettingsMenu] = useState(false);
-  const [showRenameView, setShowRenameView] = useState(false);
-  const [renameViewText, setRenameViewText] = useState('');
 
   const now = new Date();
+
+  // Stores time/date/location settings for each view
   const [viewStates, setViewStates] = useState(() => ({
     Default: {
       locations: [],
-      time: now.getHours(),
-      minutes: Math.floor(now.getMinutes() / 5) * 5,
-      date: new Date(now.getFullYear(), now.getMonth(), now.getDate()),
-      isLive: true,
-      lastManualUpdate: null
+      time: now.getHours(), // Initialize to current time
+      minutes: now.getMinutes(),
+      date: new Date(now.getFullYear(), now.getMonth(), now.getDate())
     }
   }));
 
+  // List of all saved views
   const [allViews, setAllViews] = useState(['Default']);
+
+  // Controls “Add View” popup
   const [showAddView, setShowAddView] = useState(false);
+
+  // New view name input
   const [newViewName, setNewViewName] = useState('');
+
+  // Location search popup
   const [showLocationPopup, setShowLocationPopup] = useState(false);
+
+  // Search bar text
   const [searchQuery, setSearchQuery] = useState('');
+
+  // Search results for world cities
   const [locations, setLocations] = useState([]);
+
+  // List of selected cities inside the current view
   const [selectedLocations, setSelectedLocations] = useState([]);
-  const [baseTime, setBaseTime] = useState(now.getHours());
-  const [baseMinutes, setBaseMinutes] = useState(Math.floor(now.getMinutes() / 5) * 5);
-  const [baseDate, setBaseDate] = useState(new Date(now.getFullYear(), now.getMonth(), now.getDate()));
-  const [totalStepsMoved, setTotalStepsMoved] = useState(0); // steps of 5-min
-  const [showCalendar, setShowCalendar] = useState(false);
-  const [calendarMonth, setCalendarMonth] = useState(new Date(now.getFullYear(), now.getMonth(), now.getDate()));
-  const [pendingStepChange, setPendingStepChange] = useState(0);
-  const [isLiveMode, setIsLiveMode] = useState(true);
-  const [currentTime, setCurrentTime] = useState(new Date());
-  const [showCalendarModal, setShowCalendarModal] = useState(false);
-  const [meetingTitle, setMeetingTitle] = useState('');
-  const [meetingNotes, setMeetingNotes] = useState('');
-  const [meetingDuration, setMeetingDuration] = useState(60);
-  const [expandedCards, setExpandedCards] = useState({});
-  const [expandedCardId, setExpandedCardId] = useState(null);
 
-  // Animated value for smooth visual dragging
-  const sliderAnim = useRef(new Animated.Value(0)).current;
-
-  // swipe positions for per-card swipe-to-reveal
-  const swipePositions = useRef({}).current;
-
-  // picker temporary selection for multi-add
+  // Multi-select picker state
   const [pickerSelected, setPickerSelected] = useState([]);
 
-  // measurement refs for tick container per-card
-  const ticksWidthRefs = useRef({}).current; // pixel width of ticks area per card
-  const pxPerStepRef = useRef({}).current; // pixel per 5-min step per card
-  const sliderAreaHeights = useRef({}).current; // vertical top offset/height for slider area per card (for gesture discrimination)
+  // Calendar add event state
+  const [showCalendarAdd, setShowCalendarAdd] = useState(false);
+  const [calendarAddLocation, setCalendarAddLocation] = useState(null);
+  const [eventTitle, setEventTitle] = useState('');
+  const [eventNotes, setEventNotes] = useState('');
+  const [eventDuration, setEventDuration] = useState(60);
 
-  // visible steps in slider: we want +/-12 hours visible -> 24 hours window? We'll show +/-12 hours = 144 steps (5-min)
-  const VISIBLE_STEPS = 144; // corresponds to 12 hours at 5-min steps each side (total span 24 hours if center-to-edge is 12h)
+  // The base time the whole view is calculated from
+  // Initialize to current time for location cards (slider starts at 12:00am independently)
+  const [baseTime, setBaseTime] = useState(now.getHours());
+  const [baseMinutes, setBaseMinutes] = useState(now.getMinutes());
+  const [baseDate, setBaseDate] = useState(new Date(now.getFullYear(), now.getMonth(), now.getDate()));
 
+  // Calendar popup visibility
+  const [showCalendar, setShowCalendar] = useState(false);
+
+  // Which month is shown in the calendar
+  const [calendarMonth, setCalendarMonth] = useState(new Date(now.getFullYear(), now.getMonth(), now.getDate()));
+  const [showMonthPicker, setShowMonthPicker] = useState(false);
+  const [pickerYear, setPickerYear] = useState(now.getFullYear());
+
+  // Timeline slider constants
+  const TICKS_PER_DAY = 96; // 24 hours * 4 (15-min intervals) - 00:00 to 23:45
+  const TOTAL_TICKS = 97; // Include tick 96 for 24:00 (00:00 next day)
+  const TICK_SPACING = 30; // Fixed 30px spacing - readable on all screen sizes
+
+  // Container padding constants (must match styles.js)
+  const SCROLL_PADDING = 20; // styles.scrollContent.paddingHorizontal
+  const GRADIENT_PADDING = 24; // styles.gradient.padding
+  const TOTAL_HORIZONTAL_PADDING = SCROLL_PADDING + GRADIENT_PADDING; // 44px on each side
+
+  // Timeline dimensions - ticks are positioned within sliderContainer
+  const TIMELINE_WIDTH = SCREEN_WIDTH - (TOTAL_HORIZONTAL_PADDING * 2); // SCREEN_WIDTH - 88
+  const TIMELINE_CENTER = TIMELINE_WIDTH / 2; // Center from sliderContainer's left edge
+
+  // Initialize ticks with all 97 ticks (00:00 to 24:00)
+  const initializeTicks = () => {
+    const ticks = [];
+    for (let tickIndex = 0; tickIndex < TOTAL_TICKS; tickIndex++) {
+      ticks.push({
+        id: tickIndex,
+        tickIndex: tickIndex,
+        x: tickIndex * TICK_SPACING
+      });
+    }
+    return ticks;
+  };
+
+  // Timeline slider animated value
+  // Formula: To center tick N, offset = TIMELINE_CENTER - (N * TICK_SPACING)
+  // Initialize to current time
+  const sliderOffset = useRef(
+    new Animated.Value((() => {
+      const totalMinutes = now.getHours() * 60 + now.getMinutes();
+      const exactTickPosition = totalMinutes / 15;
+      const tickPixelPosition = exactTickPosition * TICK_SPACING;
+      return TIMELINE_CENTER - tickPixelPosition;
+    })())
+  ).current;
+  const isTimelineDragging = useRef(false);
+  const lastQuarterRef = useRef(null); // Track quarter crossings for haptics
+  const isFirstMount = useRef(true); // Skip view-loading effect on first render
+  // Track current tick position (0-96) - initialize to current time rounded to nearest quarter
+  const currentTickRef = useRef(Math.round((now.getHours() * 60 + now.getMinutes()) / 15));
+  // Track velocity for momentum scrolling
+  const velocityRef = useRef({ vx: 0, time: 0 });
+
+  const ticksRef = useRef(initializeTicks());
+  const ticks = ticksRef.current; // No need for state - ticks are now static (all 97 ticks)
+
+  // Single source of truth for slider offset
+  // Returns the actual rendered offset that drives the transform
+  const getTotalOffset = () => sliderOffset._value + sliderOffset._offset;
+
+
+  // Calculate tick display data from tick index
+  const getTickDisplayData = (tickIndex) => {
+    // Tick 96 represents 24:00 (displayed as 12am of next day)
+    if (tickIndex === 96) {
+      return { hour: 0, minute: 0, isHour: true };
+    }
+
+    // Wrap to 0-95 range for time calculation
+    let normalizedIndex = tickIndex % TICKS_PER_DAY;
+    if (normalizedIndex < 0) normalizedIndex += TICKS_PER_DAY;
+
+    const totalMinutes = normalizedIndex * 15;
+    const hour = Math.floor(totalMinutes / 60);
+    const minute = totalMinutes % 60;
+    const isHour = minute === 0;
+
+    return { hour, minute, isHour };
+  };
+
+  // Removed: debugInfo state - no longer needed (infinite scrolling removed)
+
+  // Static world city list used for searching and selection
   const worldCities = [
     { city: 'Shanghai', country: 'China', timezone: 'Asia/Shanghai', utcOffset: 8 },
     { city: 'London', country: 'United Kingdom', timezone: 'Europe/London', utcOffset: 0 },
@@ -101,65 +187,6 @@ export default function TimeConverterApp() {
   ];
 
   useEffect(() => {
-    const timer = setInterval(() => {
-      setCurrentTime(new Date());
-    }, 1000);
-    return () => clearInterval(timer);
-  }, []);
-
-  // Live mode baseTime update
-  useEffect(() => {
-    if (isLiveMode && selectedLocations.length > 0) {
-      const nowDt = new Date();
-      const mainLocation = selectedLocations[0];
-      const userLocalOffset = -nowDt.getTimezoneOffset() / 60;
-      const userLocalHour = nowDt.getHours();
-      const userLocalMinutes = nowDt.getMinutes();
-      const utcHour = userLocalHour - userLocalOffset;
-      const utcMinutes = userLocalMinutes;
-      const locationTotalMinutes = (utcHour * 60 + utcMinutes) + (mainLocation.utcOffset * 60);
-
-      let locationHour = Math.floor(locationTotalMinutes / 60);
-      let locationMinutes = locationTotalMinutes % 60;
-      let locationDate = new Date(nowDt);
-
-      while (locationHour >= 24) {
-        locationHour -= 24;
-        locationDate.setDate(locationDate.getDate() + 1);
-      }
-      while (locationHour < 0) {
-        locationHour += 24;
-        locationDate.setDate(locationDate.getDate() - 1);
-      }
-
-      if (locationMinutes < 0) {
-        locationMinutes += 60;
-        locationHour -= 1;
-        if (locationHour < 0) {
-          locationHour += 24;
-          locationDate.setDate(locationDate.getDate() - 1);
-        }
-      }
-
-      const roundedMinutes = Math.floor(locationMinutes / 5) * 5;
-      // compute steps relative to reference 20:00 as earlier logic used; keep same base
-      const stepsDiff = Math.floor((locationHour * 60 + roundedMinutes - (20 * 60)) / 5);
-      const referenceDate = new Date(nowDt.getFullYear(), nowDt.getMonth(), nowDt.getDate());
-      const daysDiff = Math.floor((locationDate - referenceDate) / (1000 * 60 * 60 * 24));
-
-      setBaseTime(locationHour);
-      setBaseMinutes(roundedMinutes);
-      setBaseDate(new Date(locationDate.getFullYear(), locationDate.getMonth(), locationDate.getDate()));
-      setTotalStepsMoved(stepsDiff + (daysDiff * (24 * 60 / 5)));
-      Animated.timing(sliderAnim, {
-        toValue: 0,
-        duration: 140,
-        useNativeDriver: true,
-      }).start();
-    }
-  }, [currentTime, isLiveMode, selectedLocations]);
-
-  useEffect(() => {
     if (searchQuery) {
       const filtered = worldCities.filter(loc =>
         loc.city.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -171,6 +198,7 @@ export default function TimeConverterApp() {
     }
   }, [searchQuery]);
 
+  // Plays a small "tap" vibration on supported devices
   const triggerHaptic = () => {
     if (Platform.OS === 'ios') {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -179,18 +207,21 @@ export default function TimeConverterApp() {
     }
   };
 
+  // Returns the sky color gradient based on current time of day
   const getTimeGradient = (hour, minutes) => {
     const totalMinutes = hour * 60 + minutes;
     if (totalMinutes >= 1200 || totalMinutes < 480) {
-      return ['#1e3a8a', '#0f172a'];
+      return ['#1e3a8a', '#0f172a']; // night
     } else if (totalMinutes >= 480 && totalMinutes < 540) {
+      // sunrise transition
       const progress = (totalMinutes - 480) / 60;
       if (progress < 0.33) return ['#1e3a8a', '#1e40af'];
       else if (progress < 0.67) return ['#1e40af', '#2563eb'];
       else return ['#2563eb', '#38bdf8'];
     } else if (totalMinutes >= 540 && totalMinutes < 1140) {
-      return ['#38bdf8', '#3b82f6'];
+      return ['#38bdf8', '#3b82f6']; // daytime
     } else {
+      // sunset transition
       const progress = (totalMinutes - 1140) / 60;
       if (progress < 0.33) return ['#38bdf8', '#2563eb'];
       else if (progress < 0.67) return ['#2563eb', '#1e40af'];
@@ -198,96 +229,68 @@ export default function TimeConverterApp() {
     }
   };
 
+  // Adds a new view
   const handleAddView = () => {
     if (newViewName.trim() && !allViews.includes(newViewName.trim())) {
+
       const viewName = newViewName.trim();
-      const nowDt = new Date();
+      const now = new Date();
+
+      // Add new view to the list
       setAllViews([...allViews, viewName]);
+
+      // Initialize default time/date for the view
       setViewStates(prev => ({
         ...prev,
         [viewName]: {
           locations: [],
-          time: nowDt.getHours(),
-          minutes: Math.floor(nowDt.getMinutes() / 5) * 5,
-          date: new Date(nowDt.getFullYear(), nowDt.getMonth(), nowDt.getDate()),
-          isLive: true,
-          lastManualUpdate: null
+          time: now.getHours(),
+          minutes: Math.floor(now.getMinutes() / 15) * 15,
+          date: new Date(now.getFullYear(), now.getMonth(), now.getDate())
         }
       }));
+
       setNewViewName('');
       setShowAddView(false);
     }
   };
 
+  // Removes a view (unless it's the only one)
   const handleDeleteView = (viewName) => {
     if (allViews.length === 1) return;
+
     setAllViews(allViews.filter(v => v !== viewName));
+
     const newViewStates = { ...viewStates };
     delete newViewStates[viewName];
     setViewStates(newViewStates);
+
+    // If user deletes the active view, switch to the next available one
     if (currentView === viewName) {
       setCurrentView(allViews.filter(v => v !== viewName)[0]);
     }
   };
 
-  const handleRenameView = () => {
-    if (renameViewText.trim() && !allViews.includes(renameViewText.trim())) {
-      const oldName = currentView;
-      const newName = renameViewText.trim();
-
-      setAllViews(allViews.map(v => v === oldName ? newName : v));
-
-      const newViewStates = { ...viewStates };
-      newViewStates[newName] = newViewStates[oldName];
-      delete newViewStates[oldName];
-      setViewStates(newViewStates);
-
-      setCurrentView(newName);
-      setRenameViewText('');
-      setShowRenameView(false);
-      setShowSettingsMenu(false);
-    }
-  };
-
-  const handleDeleteCurrentView = () => {
-    if (allViews.length === 1) {
-      Alert.alert('Cannot Delete', 'You must have at least one view.');
-      return;
-    }
-
-    Alert.alert(
-      'Delete View',
-      `Are you sure you want to delete "${currentView}"?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: () => {
-            handleDeleteView(currentView);
-            setShowSettingsMenu(false);
-          }
-        }
-      ]
-    );
-  };
-
+  // Adjusts the base time to match the selected main location
   const setCurrentTimeForLocation = () => {
     if (selectedLocations.length === 0) return;
 
-    const nowDt = new Date();
+    const now = new Date();
     const mainLocation = selectedLocations[0];
-    const userLocalOffset = -nowDt.getTimezoneOffset() / 60;
-    const userLocalHour = nowDt.getHours();
-    const userLocalMinutes = nowDt.getMinutes();
+
+    // Convert user's local time → UTC → mainLocation time
+    const userLocalOffset = -now.getTimezoneOffset() / 60;
+    const userLocalHour = now.getHours();
+    const userLocalMinutes = now.getMinutes();
     const utcHour = userLocalHour - userLocalOffset;
     const utcMinutes = userLocalMinutes;
     const locationTotalMinutes = (utcHour * 60 + utcMinutes) + (mainLocation.utcOffset * 60);
 
     let locationHour = Math.floor(locationTotalMinutes / 60);
     let locationMinutes = locationTotalMinutes % 60;
-    let locationDate = new Date(nowDt);
+    let locationDate = new Date(now);
 
+    // Handle day rollover (e.g. +1 day or -1 day)
     while (locationHour >= 24) {
       locationHour -= 24;
       locationDate.setDate(locationDate.getDate() + 1);
@@ -297,58 +300,70 @@ export default function TimeConverterApp() {
       locationDate.setDate(locationDate.getDate() - 1);
     }
 
-    if (locationMinutes < 0) {
-      locationMinutes += 60;
-      locationHour -= 1;
-      if (locationHour < 0) {
-        locationHour += 24;
-        locationDate.setDate(locationDate.getDate() - 1);
-      }
-    }
-
-    const roundedMinutes = Math.floor(locationMinutes / 5) * 5;
-    const stepsDiff = Math.floor((locationHour * 60 + roundedMinutes - (20 * 60)) / 5);
-    const referenceDate = new Date(nowDt.getFullYear(), nowDt.getMonth(), nowDt.getDate());
-    const daysDiff = Math.floor((locationDate - referenceDate) / (1000 * 60 * 60 * 24));
-
+    // Update state with exact time (not rounded to quarter)
     setBaseTime(locationHour);
-    setBaseMinutes(roundedMinutes);
+    setBaseMinutes(locationMinutes);
     setBaseDate(new Date(locationDate.getFullYear(), locationDate.getMonth(), locationDate.getDate()));
-    setTotalStepsMoved(stepsDiff + (daysDiff * (24 * 60 / 5)));
-    setIsLiveMode(true);
 
-    Animated.timing(sliderAnim, {
-      toValue: 0,
-      duration: 140,
+    // Calculate offset to center this time
+    // Formula: offset = TIMELINE_CENTER - (tickPosition * TICK_SPACING)
+    const totalMinutesExact = locationHour * 60 + locationMinutes;
+    const exactTickPosition = totalMinutesExact / 15; // Can be fractional
+    const targetOffset = TIMELINE_CENTER - (exactTickPosition * TICK_SPACING);
+
+    // IMPORTANT: After flattenOffset(), _offset holds absolute position.
+    // All future animations must use relative toValue (target - _offset)
+    sliderOffset.flattenOffset();
+    const relativeOffset = targetOffset - sliderOffset._offset;
+    Animated.spring(sliderOffset, {
+      toValue: relativeOffset,
       useNativeDriver: true,
+      tension: 100,
+      friction: 10
     }).start();
   };
 
+  // Switches to a different saved view
   const handleViewChange = (view) => {
     setCurrentView(view);
     setShowViewMenu(false);
   };
 
+  // Whenever the active view changes, load its saved state
   useEffect(() => {
+    // Skip on first mount - initial offset already correctly set
+    if (isFirstMount.current) {
+      isFirstMount.current = false;
+      return;
+    }
+
     const currentState = viewStates[currentView];
+
     setSelectedLocations(currentState.locations);
     setBaseTime(currentState.time);
     setBaseMinutes(currentState.minutes || 0);
     setBaseDate(currentState.date);
     setCalendarMonth(currentState.date);
-    setIsLiveMode(currentState.isLive !== false);
 
+    // Animate slider to loaded time position
+    // Formula: offset = TIMELINE_CENTER - (tickPosition * TICK_SPACING)
     const totalMinutes = currentState.time * 60 + (currentState.minutes || 0);
-    const referenceDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const daysDiff = Math.floor((currentState.date - referenceDate) / (1000 * 60 * 60 * 24));
-    setTotalStepsMoved(Math.floor((totalMinutes - 20 * 60) / 5) + (daysDiff * (24 * 60 / 5)));
-    Animated.timing(sliderAnim, {
-      toValue: 0,
-      duration: 120,
+    const exactTickPosition = totalMinutes / 15;
+    const targetOffset = TIMELINE_CENTER - (exactTickPosition * TICK_SPACING);
+
+    // IMPORTANT: After flattenOffset(), _offset holds absolute position.
+    // All future animations must use relative toValue (target - _offset)
+    sliderOffset.flattenOffset();
+    const relativeOffset = targetOffset - sliderOffset._offset;
+    Animated.spring(sliderOffset, {
+      toValue: relativeOffset,
       useNativeDriver: true,
+      tension: 100,
+      friction: 10
     }).start();
   }, [currentView]);
 
+  // Save current view's state whenever time or locations change
   useEffect(() => {
     setViewStates(prev => ({
       ...prev,
@@ -356,12 +371,10 @@ export default function TimeConverterApp() {
         locations: selectedLocations,
         time: baseTime,
         minutes: baseMinutes,
-        date: baseDate,
-        isLive: isLiveMode,
-        lastManualUpdate: isLiveMode ? null : new Date()
+        date: baseDate
       }
     }));
-  }, [selectedLocations, baseTime, baseMinutes, baseDate, currentView, isLiveMode]);
+  }, [selectedLocations, baseTime, baseMinutes, baseDate, currentView]);
 
   // Picker multi-select helpers
   const togglePickerSelection = (location) => {
@@ -384,6 +397,37 @@ export default function TimeConverterApp() {
       setPickerSelected([]);
       return;
     }
+
+    // If first locations being added, initialize time to first location's current time
+    if (selectedLocations.length === 0 && toAdd.length > 0) {
+      const firstLocation = toAdd[0];
+      const now = new Date();
+      const utcTime = now.getTime() + (now.getTimezoneOffset() * 60000);
+      const locationTime = new Date(utcTime + (firstLocation.utcOffset * 3600000));
+
+      const locationHour = locationTime.getHours();
+      const locationMinutes = locationTime.getMinutes();
+
+      setBaseTime(locationHour);
+      setBaseMinutes(locationMinutes);
+
+      const currentTick = Math.round((locationHour * 60 + locationMinutes) / 15);
+      currentTickRef.current = currentTick;
+
+      const totalMinutesExact = locationHour * 60 + locationMinutes;
+      const exactTickPosition = totalMinutesExact / 15;
+      const targetOffset = TIMELINE_CENTER - (exactTickPosition * TICK_SPACING);
+
+      sliderOffset.flattenOffset();
+      const relativeOffset = targetOffset - sliderOffset._offset;
+      Animated.spring(sliderOffset, {
+        toValue: relativeOffset,
+        useNativeDriver: true,
+        tension: 100,
+        friction: 10
+      }).start();
+    }
+
     const withIds = toAdd.map(l => ({ ...l, id: Date.now() + Math.random() }));
     setSelectedLocations([...selectedLocations, ...withIds]);
     setPickerSelected([]);
@@ -395,82 +439,56 @@ export default function TimeConverterApp() {
     togglePickerSelection(location);
   };
 
+  // Calculates transformed time for each additional location
   const calculateTimeForLocation = (location) => {
-    if (!selectedLocations.length) return { hour: baseTime, minutes: baseMinutes, date: baseDate };
+    if (!selectedLocations.length) {
+      return { hour: baseTime, minutes: baseMinutes, date: baseDate };
+    }
 
     const mainLocation = selectedLocations[0];
+    const timeDiffMinutes = (location.utcOffset - mainLocation.utcOffset) * 60;
 
-    if (isLiveMode) {
-      const nowDt = new Date();
-      const userLocalOffset = -nowDt.getTimezoneOffset() / 60;
-      const userLocalHour = nowDt.getHours();
-      const userLocalMinutes = nowDt.getMinutes();
-      const utcHour = userLocalHour - userLocalOffset;
-      const utcMinutes = userLocalMinutes;
-      const locationTotalMinutes = (utcHour * 60 + utcMinutes) + (location.utcOffset * 60);
+    let totalMinutes = baseTime * 60 + baseMinutes + timeDiffMinutes;
+    let date = new Date(baseDate);
 
-      let locationHour = Math.floor(locationTotalMinutes / 60);
-      let locationMinutes = locationTotalMinutes % 60;
-      let locationDate = new Date(nowDt);
-
-      while (locationHour >= 24) {
-        locationHour -= 24;
-        locationDate.setDate(locationDate.getDate() + 1);
-      }
-      while (locationHour < 0) {
-        locationHour += 24;
-        locationDate.setDate(locationDate.getDate() - 1);
-      }
-
-      if (locationMinutes < 0) {
-        locationMinutes += 60;
-        locationHour -= 1;
-        if (locationHour < 0) {
-          locationHour += 24;
-          locationDate.setDate(locationDate.getDate() - 1);
-        }
-      }
-
-      return { 
-        hour: locationHour, 
-        minutes: locationMinutes, 
-        date: new Date(locationDate.getFullYear(), locationDate.getMonth(), locationDate.getDate()) 
-      };
-    } else {
-      const timeDiffHours = location.utcOffset - mainLocation.utcOffset;
-      const timeDiffMinutes = timeDiffHours * 60;
-      let totalMinutes = baseTime * 60 + baseMinutes + timeDiffMinutes;
-      let date = new Date(baseDate);
-
-      while (totalMinutes >= 1440) {
-        totalMinutes -= 1440;
-        date.setDate(date.getDate() + 1);
-      }
-      while (totalMinutes < 0) {
-        totalMinutes += 1440;
-        date.setDate(date.getDate() - 1);
-      }
-
-      const hour = Math.floor(totalMinutes / 60);
-      const minutes = totalMinutes % 60;
-
-      return { hour, minutes, date };
+    // If at tick 96 (24:00), advance date by one day
+    if (currentTickRef.current === 96) {
+      date.setDate(date.getDate() + 1);
     }
+
+    // Adjust for next/previous day if needed (timezone differences)
+    while (totalMinutes >= 1440) {
+      totalMinutes -= 1440;
+      date.setDate(date.getDate() + 1);
+    }
+    while (totalMinutes < 0) {
+      totalMinutes += 1440;
+      date.setDate(date.getDate() - 1);
+    }
+
+    return {
+      hour: Math.floor(totalMinutes / 60),
+      minutes: totalMinutes % 60,
+      date
+    };
   };
 
+  // Formats date as “Wed, Feb 12”
   const getDateString = (date) => {
     const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
     const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     return `${days[date.getDay()]}, ${months[date.getMonth()]} ${date.getDate()}`;
   };
 
+  // Converts 24-hour time to 12-hour format
   const formatTime = (hour, minutes) => {
     const h = hour % 12 || 12;
     const m = minutes.toString().padStart(2, '0');
     const ampm = hour >= 12 ? 'pm' : 'am';
-    return `${h}:${m} ${ampm}`;
+    return `${h}:${m}${ampm}`;
   };
 
+  // Returns readable time difference compared to the first (main) selected location
   const getTimeDifference = (location) => {
     if (!selectedLocations.length || location.id === selectedLocations[0].id) return null;
 
@@ -481,217 +499,176 @@ export default function TimeConverterApp() {
     return 'Same Time';
   };
 
-  // Slider pan responder - active only inside slider area (attached to inner ticks view)
-  const sliderGestureState = useRef({ isActive: false }).current;
+  // Removed: updateTickWindow() - no longer needed, timeline is now finite (no infinite scrolling)
 
-  const sliderPanResponder = useRef(
+  // Timeline slider pan responder
+  const timelinePanResponder = useRef(
     PanResponder.create({
-      onStartShouldSetPanResponder: (e, gs) => {
-        // slider handlers are attached only when expanded, so allow here
-        return true;
+      onStartShouldSetPanResponder: () => false,
+      // Only start responding if there's actual horizontal movement (not vertical)
+      onMoveShouldSetPanResponder: (_, gestureState) => {
+        const isHorizontal = Math.abs(gestureState.dx) > Math.abs(gestureState.dy);
+        const hasMovement = Math.abs(gestureState.dx) > 5;
+        return isHorizontal && hasMovement;
       },
-      onMoveShouldSetPanResponder: (e, gs) => {
-        const dx = Math.abs(gs.dx);
-        const dy = Math.abs(gs.dy);
-        return dx > 6 && dx > dy;
-      },
+
       onPanResponderGrant: () => {
-        sliderAnim.stopAnimation();
-        sliderGestureState.isActive = true;
-        setPendingStepChange(0);
-        setIsLiveMode(false);
+        // Mark that timeline dragging has started
+        isTimelineDragging.current = true;
+        // Extract current animated value and set it as the offset
+        sliderOffset.extractOffset();
       },
-      onPanResponderMove: (e, gs) => {
-        const dx = gs.dx;
-        // map dx to steps (5-min) across screen width
-        const stepsFloat = - (dx / SCREEN_WIDTH) * VISIBLE_STEPS;
-        // smooth visual movement
-        sliderAnim.setValue(dx);
 
-        const stepsRounded = Math.round(stepsFloat);
-        if (stepsRounded !== pendingStepChange) {
-          setPendingStepChange(stepsRounded);
-          triggerHaptic();
+      onPanResponderMove: (_, gestureState) => {
+        let newOffset = gestureState.dx;
+        const proposedOffset = sliderOffset._offset + newOffset;
+
+        // Track velocity for momentum scrolling
+        velocityRef.current = {
+          vx: gestureState.vx,
+          time: Date.now()
+        };
+
+        // Boundary constraints: offset to center tick 0 and tick 96 (24:00)
+        const maxOffset = TIMELINE_CENTER; // tick 0 at center
+        const minOffset = TIMELINE_CENTER - ((TOTAL_TICKS - 1) * TICK_SPACING); // tick 96 at center
+        const overscrollResistance = 0.3;
+
+        let clampedOffset = proposedOffset;
+        if (proposedOffset > maxOffset) {
+          const overscroll = proposedOffset - maxOffset;
+          clampedOffset = maxOffset + (overscroll * overscrollResistance);
+        } else if (proposedOffset < minOffset) {
+          const overscroll = minOffset - proposedOffset;
+          clampedOffset = minOffset - (overscroll * overscrollResistance);
         }
 
-        const snappedSteps = totalStepsMoved + stepsRounded;
-        const referenceDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-        const baseReferenceMinutes = (referenceDate.getHours() * 60 + Math.floor(referenceDate.getMinutes() / 5) * 5);
-        const totalMinutes = baseReferenceMinutes + (snappedSteps * 5);
-        let newHour = Math.floor(totalMinutes / 60) % 24;
-        let newMinutes = Math.round((totalMinutes % 60) / 5) * 5;
-        if (newMinutes === 60) {
-          newMinutes = 0;
-          newHour = (newHour + 1) % 24;
-        }
-        if (newHour < 0) newHour += 24;
-        const daysOffset = Math.floor(totalMinutes / 1440);
-        let newDate = new Date(referenceDate);
-        newDate.setDate(newDate.getDate() + daysOffset);
+        sliderOffset.setValue(clampedOffset - sliderOffset._offset);
 
-        setBaseTime(newHour);
-        setBaseMinutes(newMinutes);
-        setBaseDate(newDate);
+        // Calculate tick at center from single source of truth
+        const totalOffset = getTotalOffset();
+        const exactTickPosition = (TIMELINE_CENTER - totalOffset) / TICK_SPACING;
+
+        // Round to nearest 15-minute interval for display (0-96, where 96 is 24:00)
+        const nearestQuarter = Math.round(exactTickPosition);
+        const clampedQuarter = Math.max(0, Math.min(TOTAL_TICKS - 1, nearestQuarter));
+
+        // Only update time and trigger haptic when nearest tick changes
+        if (clampedQuarter !== lastQuarterRef.current) {
+          // Track current tick position
+          currentTickRef.current = clampedQuarter;
+
+          // Handle tick 96 (24:00 = 00:00 next day) - only update time, date handled in calculateTimeForLocation
+          if (clampedQuarter === 96) {
+            setBaseTime(0);
+            setBaseMinutes(0);
+          } else {
+            const totalMinutesRounded = clampedQuarter * 15;
+            const newHour = Math.floor(totalMinutesRounded / 60) % 24;
+            const newMinute = totalMinutesRounded % 60;
+
+            setBaseTime(newHour);
+            setBaseMinutes(newMinute);
+          }
+
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          lastQuarterRef.current = clampedQuarter;
+        }
       },
+
       onPanResponderRelease: () => {
-        sliderGestureState.isActive = false;
-        const targetSteps = totalStepsMoved + pendingStepChange;
-        setTotalStepsMoved(targetSteps);
+        isTimelineDragging.current = false;
 
-        const referenceDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-        const baseReferenceMinutes = (referenceDate.getHours() * 60 + Math.floor(referenceDate.getMinutes() / 5) * 5);
-        const totalMinutes = baseReferenceMinutes + (targetSteps * 5);
-        let newHour = Math.floor(totalMinutes / 60) % 24;
-        let newMinutes = Math.round((totalMinutes % 60) / 5) * 5;
-        if (newMinutes === 60) {
-          newMinutes = 0;
-          newHour = (newHour + 1) % 24;
+        const totalOffset = sliderOffset._offset + sliderOffset._value;
+
+        // Apply momentum if velocity is significant
+        const velocity = velocityRef.current.vx;
+        const minVelocity = 0.5; // Minimum velocity to trigger momentum
+        const momentumMultiplier = 300; // How far momentum carries
+
+        let momentumOffset = 0;
+        if (Math.abs(velocity) > minVelocity) {
+          momentumOffset = velocity * momentumMultiplier;
         }
-        if (newHour < 0) newHour += 24;
 
-        const daysOffset = Math.floor(totalMinutes / 1440);
-        let newDate = new Date(referenceDate);
-        newDate.setDate(newDate.getDate() + daysOffset);
+        // Calculate target position with momentum
+        const targetOffset = totalOffset + momentumOffset;
+        const exactTickPosition = (TIMELINE_CENTER - targetOffset) / TICK_SPACING;
+        const nearestQuarter = Math.round(exactTickPosition);
+        const clampedQuarter = Math.max(0, Math.min(TOTAL_TICKS - 1, nearestQuarter));
 
-        setBaseTime(newHour);
-        setBaseMinutes(newMinutes);
-        setBaseDate(newDate);
-        setPendingStepChange(0);
+        // Calculate offset to center this tick: offset = TIMELINE_CENTER - (tick * TICK_SPACING)
+        let finalOffset = TIMELINE_CENTER - (clampedQuarter * TICK_SPACING);
 
-        // animate sliderAnim back to center
-        Animated.timing(sliderAnim, {
-          toValue: 0,
-          duration: 160,
-          useNativeDriver: true,
-        }).start();
+        // IMPORTANT: After flattenOffset(), _offset holds absolute position.
+        // All future animations must use relative toValue (target - _offset)
+        sliderOffset.flattenOffset();
+        const relativeOffset = finalOffset - sliderOffset._offset;
+
+        // Use decay animation for momentum effect, then spring to snap
+        if (Math.abs(velocity) > minVelocity) {
+          Animated.sequence([
+            Animated.decay(sliderOffset, {
+              velocity: velocity,
+              deceleration: 0.997,
+              useNativeDriver: true,
+            }),
+            Animated.spring(sliderOffset, {
+              toValue: relativeOffset,
+              useNativeDriver: true,
+              tension: 100,
+              friction: 10
+            })
+          ]).start();
+        } else {
+          Animated.spring(sliderOffset, {
+            toValue: relativeOffset,
+            useNativeDriver: true,
+            tension: 100,
+            friction: 10
+          }).start();
+        }
+
+        // Track current tick position
+        currentTickRef.current = clampedQuarter;
+
+        // Update time - handle tick 96 (24:00 = 00:00 next day) - date handled in calculateTimeForLocation
+        if (clampedQuarter === 96) {
+          setBaseTime(0);
+          setBaseMinutes(0);
+        } else {
+          const snappedMinutes = clampedQuarter * 15;
+          const snappedHour = Math.floor(snappedMinutes / 60) % 24;
+          const snappedMinute = snappedMinutes % 60;
+
+          setBaseTime(snappedHour);
+          setBaseMinutes(snappedMinute);
+        }
+
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       },
+
       onPanResponderTerminate: () => {
-        setPendingStepChange(0);
-        Animated.timing(sliderAnim, {
-          toValue: 0,
-          duration: 120,
-          useNativeDriver: true,
-        }).start();
-      }
+        // If another responder takes over, mark dragging as ended
+        isTimelineDragging.current = false;
+      },
+
+      // Prevent ScrollView from taking over while timeline is being dragged
+      onPanResponderTerminationRequest: () => false,
     })
   ).current;
 
-  // Per-card swipe responder factory - improved conflict handling:
-  // Only allow swipes when touch starts in the top strip of the card (prevents accidental swipes while using slider)
-  const createSwipePanResponder = (locationId) => {
-    if (!swipePositions[locationId]) {
-      const val = new Animated.Value(0);
-      val._gestureState = { wasExpanded: false };
-      swipePositions[locationId] = val;
-    }
-
-    // how tall the top strip is (in px) that responds to card swiping
-    const TOP_SWIPE_HEIGHT = 56;
-
-    return PanResponder.create({
-      onStartShouldSetPanResponder: (evt, gs) => {
-        // disable swipe when card is expanded (prevents interference with time slider)
-        if (expandedCardId === locationId) {
-          return false;
-        }
-        // limit card-swiping to the small top strip
-        const touchY = evt.nativeEvent.locationY; // position relative to card
-        if (touchY > TOP_SWIPE_HEIGHT) {
-          // touch started below top strip -> do not claim responder (prevents accidental swipes while adjusting slider)
-          return false;
-        }
-        // otherwise allow swipe to start
-        return true;
-      },
-      onMoveShouldSetPanResponder: (_, gestureState) => {
-        // disable swipe when card is expanded
-        if (expandedCardId === locationId) {
-          return false;
-        }
-        return Math.abs(gestureState.dx) > 10 && Math.abs(gestureState.dx) > Math.abs(gestureState.dy);
-      },
-      onPanResponderGrant: () => {
-        swipePositions[locationId]._gestureState.wasExpanded = (expandedCardId === locationId);
-        if (swipePositions[locationId]._gestureState.wasExpanded) {
-          // collapse visually so swipe can reveal actions
-          setExpandedCardId(null);
-        }
-      },
-      onPanResponderMove: (_, gestureState) => {
-        if (gestureState.dx < 0) {
-          swipePositions[locationId].setValue(Math.max(gestureState.dx, -160));
-        } else if (swipePositions[locationId]._value < 0) {
-          swipePositions[locationId].setValue(Math.min(gestureState.dx + swipePositions[locationId]._value, 0));
-        }
-      },
-      onPanResponderRelease: (_, gestureState) => {
-        if (gestureState.dx < -80) {
-          Animated.spring(swipePositions[locationId], {
-            toValue: -160,
-            useNativeDriver: true,
-          }).start();
-        } else {
-          Animated.spring(swipePositions[locationId], {
-            toValue: 0,
-            useNativeDriver: true,
-          }).start();
-        }
-        swipePositions[locationId]._gestureState.wasExpanded = false;
-      },
-    });
-  };
-
-  const deleteLocation = (locationId) => {
-    setSelectedLocations(selectedLocations.filter(loc => loc.id !== locationId));
-    if (swipePositions[locationId]) {
-      Animated.spring(swipePositions[locationId], {
-        toValue: 0,
-        useNativeDriver: true,
-      }).start(() => {
-        swipePositions[locationId].setValue(0);
-      });
-    }
-    if (expandedCardId === locationId) setExpandedCardId(null);
-  };
-
-  const pinLocation = (locationId) => {
-    const locationToPin = selectedLocations.find(loc => loc.id === locationId);
-    if (!locationToPin) return;
-    const otherLocations = selectedLocations.filter(loc => loc.id !== locationId);
-    setSelectedLocations([locationToPin, ...otherLocations]);
-
-    if (swipePositions[locationId]) {
-      Animated.spring(swipePositions[locationId], {
-        toValue: 0,
-        useNativeDriver: true,
-      }).start();
-    }
-  };
-
-  // render ticks at 5-minute steps with denser small ticks, medium 15-min, big hourly ticks with labels
-  const renderSliderTicks = () => {
-    const ticks = [];
-    // base minutes preview
-    const currentTotalMinutes = baseTime * 60 + baseMinutes + (pendingStepChange * 5);
-    // show center +/- (VISIBLE_STEPS/2)
-    const half = Math.floor(VISIBLE_STEPS / 2);
-    for (let s = -half; s <= half; s++) {
-      const tickTotalMinutes = currentTotalMinutes + (s * 5);
-      let adjustedMinutes = tickTotalMinutes % 1440;
-      if (adjustedMinutes < 0) adjustedMinutes += 1440;
-      const tickHour = Math.floor(adjustedMinutes / 60);
-      const tickMinute = adjustedMinutes % 60;
-      const isHour = tickMinute === 0;
-      const isQuarter = tickMinute % 15 === 0;
-      ticks.push({ step: s, minute: tickMinute, hour: tickHour, isHour, isQuarter, key: s });
-    }
-    return ticks;
-  };
-
+  // Generates a 7-day range centered around the selected base date
   const generateWeekDays = () => {
     const days = [];
-    const startDate = new Date(baseDate);
-    startDate.setDate(baseDate.getDate() - 3);
+    // If at tick 96 (24:00), use next day as base
+    const effectiveBaseDate = new Date(baseDate);
+    if (currentTickRef.current === 96) {
+      effectiveBaseDate.setDate(effectiveBaseDate.getDate() + 1);
+    }
+
+    const startDate = new Date(effectiveBaseDate);
+    startDate.setDate(effectiveBaseDate.getDate() - 3);
 
     for (let i = 0; i < 7; i++) {
       const day = new Date(startDate);
@@ -702,6 +679,7 @@ export default function TimeConverterApp() {
     return days;
   };
 
+  // Generates days for the monthly calendar view
   const generateCalendarDays = () => {
     const year = calendarMonth.getFullYear();
     const month = calendarMonth.getMonth();
@@ -710,10 +688,12 @@ export default function TimeConverterApp() {
     const startDay = firstDay.getDay();
     const days = [];
 
+    // Add blank placeholders for alignment
     for (let i = 0; i < startDay; i++) {
       days.push(null);
     }
 
+    // Add actual month days
     for (let i = 1; i <= lastDay.getDate(); i++) {
       days.push(new Date(year, month, i));
     }
@@ -721,14 +701,29 @@ export default function TimeConverterApp() {
     return days;
   };
 
+  // Navigate calendar view to previous month
   const handlePrevMonth = () => {
-    setCalendarMonth(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() - 1, 1));
+    if (showMonthPicker) {
+      setPickerYear(pickerYear - 1);
+    } else {
+      setCalendarMonth(
+        new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() - 1, 1)
+      );
+    }
   };
 
+  // Navigate calendar view to next month
   const handleNextMonth = () => {
-    setCalendarMonth(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 1));
+    if (showMonthPicker) {
+      setPickerYear(pickerYear + 1);
+    } else {
+      setCalendarMonth(
+        new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 1)
+      );
+    }
   };
 
+  // Helper to get the pinned location's date/time as UTC
   const getPinnedLocationDateTime = () => {
     if (selectedLocations.length === 0) return null;
 
@@ -736,7 +731,6 @@ export default function TimeConverterApp() {
     const { hour, minutes, date } = calculateTimeForLocation(mainLocation);
 
     // Create a UTC date representing the exact moment in the pinned location's timezone
-    // We need to work backwards from the location's local time to UTC
     const locationDateTime = new Date(date);
     locationDateTime.setHours(hour, minutes, 0, 0);
 
@@ -746,54 +740,58 @@ export default function TimeConverterApp() {
     return utcTime;
   };
 
-  const handleAddToCalendar = () => {
-    if (selectedLocations.length === 0) return;
-    setMeetingTitle('');
-    setMeetingNotes('');
-    setMeetingDuration(60);
-    setShowCalendarModal(true);
+  // Opens the calendar add modal for a specific location
+  const handleAddToCalendar = (location) => {
+    setCalendarAddLocation(location);
+    setEventTitle('');
+    setEventNotes('');
+    setEventDuration(60);
+    setShowCalendarAdd(true);
   };
 
+  // Add event to Google Calendar
   const addToGoogleCalendar = () => {
     const eventTime = getPinnedLocationDateTime();
     if (!eventTime) return;
 
-    const endTime = new Date(eventTime.getTime() + meetingDuration * 60000);
+    const endTime = new Date(eventTime.getTime() + eventDuration * 60000);
 
     const formatGoogleDate = (date) => {
       return date.toISOString().replace(/-|:|\.\d\d\d/g, '');
     };
 
-    const title = meetingTitle || 'Meeting';
+    const title = eventTitle || 'Meeting';
     const location = selectedLocations[0].city;
-    const description = meetingNotes || '';
+    const description = eventNotes || '';
 
     const url = `https://www.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(title)}&dates=${formatGoogleDate(eventTime)}/${formatGoogleDate(endTime)}&location=${encodeURIComponent(location)}&details=${encodeURIComponent(description)}&sf=true&output=xml`;
 
     Linking.openURL(url);
-    setShowCalendarModal(false);
+    setShowCalendarAdd(false);
   };
 
+  // Add event to Outlook Calendar
   const addToOutlookCalendar = () => {
     const eventTime = getPinnedLocationDateTime();
     if (!eventTime) return;
 
-    const endTime = new Date(eventTime.getTime() + meetingDuration * 60000);
+    const endTime = new Date(eventTime.getTime() + eventDuration * 60000);
 
     const formatOutlookDate = (date) => {
       return date.toISOString();
     };
 
-    const title = meetingTitle || 'Meeting';
+    const title = eventTitle || 'Meeting';
     const location = selectedLocations[0].city;
-    const description = meetingNotes || '';
+    const description = eventNotes || '';
 
     const url = `https://outlook.live.com/calendar/0/deeplink/compose?subject=${encodeURIComponent(title)}&startdt=${formatOutlookDate(eventTime)}&enddt=${formatOutlookDate(endTime)}&location=${encodeURIComponent(location)}&body=${encodeURIComponent(description)}&path=/calendar/action/compose&rru=addevent`;
 
     Linking.openURL(url);
-    setShowCalendarModal(false);
+    setShowCalendarAdd(false);
   };
 
+  // Add event to Apple Calendar (native)
   const addToAppleCalendar = async () => {
     const eventTime = getPinnedLocationDateTime();
     if (!eventTime) return;
@@ -814,88 +812,54 @@ export default function TimeConverterApp() {
         return;
       }
 
-      const endTime = new Date(eventTime.getTime() + meetingDuration * 60000);
+      const endTime = new Date(eventTime.getTime() + eventDuration * 60000);
 
       await Calendar.createEventAsync(defaultCalendar.id, {
-        title: meetingTitle || 'Meeting',
+        title: eventTitle || 'Meeting',
         startDate: eventTime,
         endDate: endTime,
         location: selectedLocations[0].city,
-        notes: meetingNotes || '',
+        notes: eventNotes || '',
         timeZone: 'default',
       });
 
       Alert.alert('Success', 'Event added to calendar!');
-      setShowCalendarModal(false);
+      setShowCalendarAdd(false);
     } catch (error) {
       console.error('Error adding to calendar:', error);
       Alert.alert('Error', 'Failed to add event to calendar');
     }
   };
 
-  const handleCardPress = (locationId) => {
-    // tap to expand/collapse - user requested tap to expand
-    if (expandedCardId === locationId) {
-      setExpandedCardId(null);
-    } else {
-      setExpandedCardId(locationId);
-      // reset swipe position
-      if (swipePositions[locationId]) {
-        Animated.spring(swipePositions[locationId], {
-          toValue: 0,
-          useNativeDriver: true,
-        }).start();
-      }
-    }
-    triggerHaptic();
-  };
-
-  // compute left position in px for per-card indicator
-  const computeIndicatorLeft = (cardId, stepOffset) => {
-    const width = ticksWidthRefs[cardId] || 0;
-    const pxPerStep = pxPerStepRef[cardId] || (width / (VISIBLE_STEPS || 1));
-    const centerX = width / 2;
-    return centerX + (stepOffset * pxPerStep);
-  };
-
   return (
+
     <View style={styles.container}>
-      {/* Header */}
+      {/* HEADER */}
       <View style={styles.header}>
-        <View style={styles.headerLeft}>
-          <TouchableOpacity
-            style={styles.viewButton}
-            onPress={() => setShowViewMenu(!showViewMenu)}
-          >
-            <Text style={styles.viewButtonTextOrange}>{currentView}</Text>
-            <Text style={styles.viewButtonTextGray}> View</Text>
-            <Ionicons name="chevron-down" size={16} color="#9ca3af" />
-          </TouchableOpacity>
+        {/* Current View Selector */}
+        <TouchableOpacity
+          style={styles.viewButton}
+          onPress={() => setShowViewMenu(!showViewMenu)}
+        >
+          <Text style={styles.viewButtonTextOrange}>{currentView}</Text>
+          <Text style={styles.viewButtonTextGray}> View</Text>
+          <Ionicons name="chevron-down" size={16} color="#9ca3af" />
+        </TouchableOpacity>
 
-          <TouchableOpacity
-            style={styles.settingsButton}
-            onPress={() => setShowSettingsMenu(!showSettingsMenu)}
-          >
-            <Ionicons name="settings-outline" size={20} color="#9ca3af" />
-          </TouchableOpacity>
-        </View>
-
+        {/* Add Location Button */}
         <TouchableOpacity
           style={styles.addButton}
-          onPress={() => {
-            setShowLocationPopup(true);
-            setPickerSelected([]);
-            setSearchQuery('');
-          }}
+          onPress={() => setShowLocationPopup(true)}
         >
           <Ionicons name="add" size={24} color="white" />
         </TouchableOpacity>
       </View>
 
-      {/* Scrollable Content */}
+      {/* SCROLLABLE LOCATIONS */}
       <ScrollView
         style={styles.scrollContent}
         contentContainerStyle={styles.scrollContentContainer}
+        scrollEnabled={false}
       >
         {selectedLocations.length > 0 ? (
           selectedLocations.map((location, index) => {
@@ -903,189 +867,136 @@ export default function TimeConverterApp() {
             const isMain = index === 0;
             const timeDiff = getTimeDifference(location);
             const gradient = getTimeGradient(hour, minutes);
-            const isExpanded = expandedCardId === location.id;
-
-            if (!swipePositions[location.id]) {
-              const val = new Animated.Value(0);
-              val._gestureState = { wasExpanded: false };
-              swipePositions[location.id] = val;
-            }
-
-            // compute per-card indicator step offset (rounded to nearest 5-min step)
-            let indicatorStepOffset = 0;
-            if (isLiveMode) {
-              // compute current time for this location (in minutes)
-              const nowDt = new Date();
-              const userLocalOffset = -nowDt.getTimezoneOffset() / 60;
-              const utcHour = nowDt.getHours() - userLocalOffset;
-              const utcMinutes = nowDt.getMinutes();
-              const locationTotalMinutesRaw = (utcHour * 60 + utcMinutes) + (location.utcOffset * 60);
-
-              // normalize into 0..1439
-              let locationTotalMinutes = locationTotalMinutesRaw % 1440;
-              if (locationTotalMinutes < 0) locationTotalMinutes += 1440;
-
-              // use same rounding behavior as slider (floor to 5-min)
-              const roundedLocMinutes = Math.floor((locationTotalMinutes % 60) / 5) * 5;
-              const locHour = Math.floor(locationTotalMinutes / 60);
-              const locTotalRounded = locHour * 60 + roundedLocMinutes;
-
-              // compute current slider center time in total minutes (same as renderSliderTicks)
-              const currentTotalMinutes = baseTime * 60 + baseMinutes + (pendingStepChange * 5);
-
-              // difference from slider center
-              let diffMinutes = locTotalRounded - currentTotalMinutes;
-
-              // normalize to -720..720 to account for wrap-around (choose shortest direction)
-              if (diffMinutes > 720) diffMinutes -= 1440;
-              if (diffMinutes < -720) diffMinutes += 1440;
-
-              indicatorStepOffset = Math.round(diffMinutes / 5);
-            } else {
-              const main = selectedLocations[0];
-              const timeDiffHours = location.utcOffset - main.utcOffset;
-              indicatorStepOffset = Math.round((timeDiffHours * 60) / 5);
-            }
 
             return (
               <View key={location.id} style={styles.locationContainer}>
-                <View style={styles.swipeActions}>
-                  <TouchableOpacity
-                    style={[styles.actionButton, styles.deleteButton]}
-                    onPress={() => deleteLocation(location.id)}
+                {/* LOCATION CARD */}
+                <View style={styles.locationCard}>
+                  <LinearGradient
+                    colors={gradient}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 0 }}
+                    style={styles.gradient}
                   >
-                    <Ionicons name="close" size={28} color="white" />
-                    <Text style={styles.actionButtonText}>Delete</Text>
-                  </TouchableOpacity>
-                  {!isMain && (
-                    <TouchableOpacity
-                      style={[styles.actionButton, styles.pinButton]}
-                      onPress={() => pinLocation(location.id)}
-                    >
-                      <Ionicons name="pin" size={28} color="white" />
-                      <Text style={styles.actionButtonText}>Pin</Text>
-                    </TouchableOpacity>
-                  )}
-                </View>
-
-                <Animated.View
-                  style={[
-                    styles.locationCard,
-                    {
-                      transform: [{ translateX: swipePositions[location.id] }],
-                    },
-                  ]}
-                  {...createSwipePanResponder(location.id).panHandlers}
-                >
-                  <TouchableOpacity
-                    activeOpacity={0.9}
-                    onPress={() => handleCardPress(location.id)}
-                  >
-                    <LinearGradient
-                      colors={gradient}
-                      start={{ x: 0, y: 0 }}
-                      end={{ x: 1, y: 0 }}
-                      style={styles.gradient}
-                    >
-                      <View style={styles.locationHeader}>
-                        <View style={styles.locationInfo}>
-                          <View style={styles.dot} />
-                          <View>
-                            <Text style={styles.cityName}>{location.city}</Text>
-                            <Text style={styles.locationSubtext}>
-                              {isMain ? 'Current Location' : timeDiff}
-                            </Text>
-                          </View>
-                        </View>
-                        <View style={styles.timeDisplay}>
-                          <Text style={styles.timeText}>{formatTime(hour, minutes)}</Text>
-                          <Text style={styles.dateText}>{getDateString(date)}</Text>
+                    {/* Location Header */}
+                    <View style={styles.locationHeader}>
+                      <View style={styles.locationInfo}>
+                        <View style={styles.dot} />
+                        <View>
+                          <Text style={styles.cityName}>{location.city}</Text>
+                          <Text style={styles.locationSubtext}>
+                            {isMain ? 'Current Location' : timeDiff}
+                          </Text>
                         </View>
                       </View>
+                      <View style={styles.timeDisplay}>
+                        <Text style={styles.timeText}>{formatTime(hour, minutes)}</Text>
+                        <Text style={styles.dateText}>{getDateString(date)}</Text>
+                      </View>
+                    </View>
 
-                     {isExpanded && (
-  <>
-    {/* --- NEW SLIDER FROM app2.js --- */}
-    <View
-      style={styles.sliderContainer}
-      {...sliderPanResponder.panHandlers}
-    >
-      <View style={styles.ticksContainer}>
-        {renderSliderTicks().map((tick, index) => (
-          <View
-            key={index}
-            style={[
-              styles.tick,
-              tick.isHour ? styles.tickHour : styles.tickRegular,
-            ]}
-          />
-        ))}
-      </View>
+                    {/* TIMELINE SLIDER & WEEK SELECTOR (only for main location) */}
+                    {isMain && (
+                      <>
+                        {/* Timeline Slider */}
+                        <View style={styles.sliderContainer} {...timelinePanResponder.panHandlers}>
+                          {/* Fixed center indicator */}
+                          <View style={styles.centerIndicator} />
 
-      {/* Center indicator */}
-      <View style={styles.centerIndicator}>
-        <View style={styles.centerDot} />
-      </View>
-    </View>
+                          {/* Animated tick container */}
+                          <Animated.View
+                            style={[
+                              styles.ticksContainer,
+                              {
+                                position: 'absolute',
+                                left: 0,
+                                transform: [{ translateX: sliderOffset }],
+                              },
+                            ]}
+                          >
+                            {ticks.map((tick) => {
+                              const displayData = getTickDisplayData(tick.tickIndex);
 
-    {/* Weekday selector remains unchanged */}
-    <View style={styles.weekContainer}>
-      {generateWeekDays().map((day, idx) => {
-        const isSelected = day.toDateString() === baseDate.toDateString();
-        return (
-          <TouchableOpacity
-            key={idx}
-            style={[styles.dayButton, isSelected && styles.dayButtonSelected]}
-            onPress={() => {
-              setBaseDate(day);
-              setIsLiveMode(false);
-            }}
-          >
-            <Text style={styles.dayLabel}>
-              {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][day.getDay()]}
-            </Text>
-            <Text
-              style={[
-                styles.dayNumber,
-                isSelected && styles.dayNumberSelected,
-              ]}
-            >
-              {day.getDate()}
-            </Text>
-          </TouchableOpacity>
-        );
-      })}
-      <TouchableOpacity
-        style={styles.calendarButton}
-        onPress={() => {
-          setCalendarMonth(baseDate);
-          setShowCalendar(true);
-        }}
-      >
-        <Ionicons name="calendar-outline" size={20} color="white" />
-      </TouchableOpacity>
-    </View>
-  </>
-)}
+                              return (
+                                <View
+                                  key={tick.id}
+                                  style={[
+                                    styles.tickWrapper,
+                                    { left: tick.x }
+                                  ]}
+                                >
+                                  <View
+                                    style={[
+                                      styles.tick,
+                                      displayData.isHour && styles.tickHour
+                                    ]}
+                                  />
+                                  {displayData.isHour && (
+                                    <Text style={styles.tickLabel}>
+                                      {displayData.hour === 0 ? '12am' :
+                                        displayData.hour < 12 ? `${displayData.hour}am` :
+                                          displayData.hour === 12 ? '12pm' :
+                                            `${displayData.hour - 12}pm`}
+                                    </Text>
+                                  )}
+                                </View>
+                              );
+                            })}
+                          </Animated.View>
+                        </View>
 
-                    </LinearGradient>
-                  </TouchableOpacity>
-                </Animated.View>
+                        {/* Week Days */}
+                        <View style={styles.weekContainer}>
+                          {generateWeekDays().map((day, idx) => {
+                            // If at tick 96, compare with next day
+                            const effectiveBaseDate = new Date(baseDate);
+                            if (currentTickRef.current === 96) {
+                              effectiveBaseDate.setDate(effectiveBaseDate.getDate() + 1);
+                            }
+                            const isSelected = day.toDateString() === effectiveBaseDate.toDateString();
+                            const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+                            return (
+                              <TouchableOpacity
+                                key={idx}
+                                style={[styles.dayButton, isSelected && styles.dayButtonSelected]}
+                                onPress={() => setBaseDate(day)}
+                              >
+                                <Text style={styles.dayLabel}>{dayNames[day.getDay()]}</Text>
+                                <Text style={[styles.dayNumber, isSelected && styles.dayNumberSelected]}>
+                                  {day.getDate()}
+                                </Text>
+                              </TouchableOpacity>
+                            );
+                          })}
+                          {/* Calendar Button */}
+                          <TouchableOpacity
+                            style={styles.calendarButton}
+                            onPress={() => {
+                              setCalendarMonth(baseDate);
+                              setShowCalendar(true);
+                            }}
+                          >
+                            <Ionicons name="calendar-outline" size={20} color="white" />
+                          </TouchableOpacity>
+                        </View>
+                      </>
+                    )}
+                  </LinearGradient>
+                </View>
               </View>
             );
           })
         ) : (
+          /* EMPTY STATE */
           <View style={styles.emptyState}>
             <Ionicons name="globe-outline" size={64} color="#4b5563" />
             <Text style={styles.emptyText}>No time zones added yet</Text>
             <Text style={styles.emptySubtext}>Tap + to add time zones</Text>
           </View>
         )}
-
-        <View style={{ height: 16 }} />
       </ScrollView>
 
-      {/* Bottom Buttons */}
+      {/* FIXED BOTTOM BUTTONS */}
       <View style={styles.bottomButtons}>
         <TouchableOpacity
           style={[styles.bottomButton, selectedLocations.length === 0 && styles.bottomButtonDisabled]}
@@ -1105,90 +1016,7 @@ export default function TimeConverterApp() {
         </TouchableOpacity>
       </View>
 
-      {/* Settings */}
-      <Modal
-        visible={showSettingsMenu}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setShowSettingsMenu(false)}
-      >
-        <TouchableOpacity
-          style={styles.modalOverlay}
-          activeOpacity={1}
-          onPress={() => setShowSettingsMenu(false)}
-        >
-          <View style={styles.settingsMenu}>
-            <TouchableOpacity
-              style={styles.settingsMenuItem}
-              onPress={() => {
-                setRenameViewText(currentView);
-                setShowRenameView(true);
-                setShowSettingsMenu(false);
-              }}
-            >
-              <Ionicons name="pencil-outline" size={20} color="#3b82f6" />
-              <Text style={styles.settingsMenuText}>Rename View</Text>
-            </TouchableOpacity>
-            <View style={styles.settingsMenuDivider} />
-            <TouchableOpacity
-              style={styles.settingsMenuItem}
-              onPress={handleDeleteCurrentView}
-            >
-              <Ionicons name="trash-outline" size={20} color="#ef4444" />
-              <Text style={[styles.settingsMenuText, styles.settingsMenuTextDanger]}>Delete View</Text>
-            </TouchableOpacity>
-          </View>
-        </TouchableOpacity>
-      </Modal>
-
-      {/* Rename View Modal */}
-      <Modal
-        visible={showRenameView}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setShowRenameView(false)}
-      >
-        <TouchableOpacity
-          style={styles.modalOverlay}
-          activeOpacity={1}
-          onPress={() => setShowRenameView(false)}
-        >
-          <TouchableOpacity
-            style={styles.renameViewModal}
-            activeOpacity={1}
-            onPress={(e) => e.stopPropagation()}
-          >
-            <Text style={styles.renameViewTitle}>Rename View</Text>
-            <TextInput
-              style={styles.renameViewInput}
-              placeholder="New view name..."
-              placeholderTextColor="#9ca3af"
-              value={renameViewText}
-              onChangeText={setRenameViewText}
-              autoFocus
-            />
-            <View style={styles.renameViewButtons}>
-              <TouchableOpacity
-                style={styles.renameViewButtonCancel}
-                onPress={() => {
-                  setShowRenameView(false);
-                  setRenameViewText('');
-                }}
-              >
-                <Text style={styles.renameViewButtonText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.renameViewButtonConfirm}
-                onPress={handleRenameView}
-              >
-                <Text style={styles.renameViewButtonText}>Rename</Text>
-              </TouchableOpacity>
-            </View>
-          </TouchableOpacity>
-        </TouchableOpacity>
-      </Modal>
-
-      {/* View Menu */}
+      {/* VIEW MENU MODAL */}
       <Modal
         visible={showViewMenu}
         transparent
@@ -1248,10 +1076,7 @@ export default function TimeConverterApp() {
                 </View>
               </View>
             ) : (
-              <TouchableOpacity
-                style={styles.addViewMenuItem}
-                onPress={() => setShowAddView(true)}
-              >
+              <TouchableOpacity style={styles.addViewMenuItem} onPress={() => setShowAddView(true)}>
                 <Ionicons name="add" size={16} color="#3b82f6" />
                 <Text style={styles.addViewMenuText}>Add New View</Text>
               </TouchableOpacity>
@@ -1260,15 +1085,16 @@ export default function TimeConverterApp() {
         </TouchableOpacity>
       </Modal>
 
-      {/* Location Popup (multi-select) */}
+      {/* Location Popup Modal */}
       <Modal
-        visible={showLocationPopup}
+        visible={showLocationPopup}        // Shows when user taps "+" to add a location
         transparent
         animationType="slide"
-        onRequestClose={() => setShowLocationPopup(false)}
+        onRequestClose={() => setShowLocationPopup(false)} // Close on back button (Android)
       >
         <View style={styles.modalOverlay}>
           <View style={styles.locationPopup}>
+            {/* Header with title and close button */}
             <View style={styles.locationPopupHeader}>
               <Text style={styles.locationPopupTitle}>Add Location(s)</Text>
               <TouchableOpacity onPress={() => setShowLocationPopup(false)}>
@@ -1276,6 +1102,7 @@ export default function TimeConverterApp() {
               </TouchableOpacity>
             </View>
 
+            {/* Selected locations tags */}
             <View style={styles.pickerTagsContainer}>
               <ScrollView horizontal showsHorizontalScrollIndicator={false}>
                 {pickerSelected.map((p, i) => (
@@ -1291,6 +1118,7 @@ export default function TimeConverterApp() {
               </ScrollView>
             </View>
 
+            {/* Search input to filter cities */}
             <TextInput
               style={styles.searchInput}
               placeholder="Search City..."
@@ -1299,6 +1127,7 @@ export default function TimeConverterApp() {
               onChangeText={setSearchQuery}
             />
 
+            {/* Scrollable list of locations */}
             <ScrollView style={styles.locationList}>
               {locations.map((location, idx) => {
                 const isSelected = !!pickerSelected.find(l => l.city === location.city);
@@ -1322,6 +1151,7 @@ export default function TimeConverterApp() {
               })}
             </ScrollView>
 
+            {/* Done/Cancel buttons */}
             <View style={styles.pickerButtonsRow}>
               <TouchableOpacity
                 style={styles.pickerButtonCancel}
@@ -1346,11 +1176,12 @@ export default function TimeConverterApp() {
 
       {/* Calendar Modal */}
       <Modal
-        visible={showCalendar}
+        visible={showCalendar}              // Opens when user taps calendar icon in week/day selector
         transparent
         animationType="fade"
         onRequestClose={() => setShowCalendar(false)}
       >
+        {/* Overlay closes modal on tap outside */}
         <TouchableOpacity
           style={styles.modalOverlay}
           activeOpacity={1}
@@ -1359,67 +1190,99 @@ export default function TimeConverterApp() {
           <TouchableOpacity
             style={styles.calendarPopup}
             activeOpacity={1}
-            onPress={(e) => e.stopPropagation()}
+            onPress={(e) => e.stopPropagation()} // Prevent tap inside popup from closing modal
           >
+            {/* Calendar header: month navigation */}
             <View style={styles.calendarHeader}>
               <TouchableOpacity onPress={handlePrevMonth} style={styles.calendarArrow}>
                 <Ionicons name="chevron-back" size={24} color="white" />
               </TouchableOpacity>
-              <Text style={styles.calendarTitle}>
-                {calendarMonth.toLocaleString('default', { month: 'long', year: 'numeric' })}
-              </Text>
+              <TouchableOpacity onPress={() => {
+                if (!showMonthPicker) {
+                  setPickerYear(calendarMonth.getFullYear());
+                }
+                setShowMonthPicker(!showMonthPicker);
+              }}>
+                <Text style={styles.calendarTitle}>
+                  {showMonthPicker
+                    ? pickerYear
+                    : calendarMonth.toLocaleString('default', { month: 'long', year: 'numeric' })}
+                </Text>
+              </TouchableOpacity>
               <TouchableOpacity onPress={handleNextMonth} style={styles.calendarArrow}>
                 <Ionicons name="chevron-forward" size={24} color="white" />
               </TouchableOpacity>
             </View>
-            <View style={styles.calendarGrid}>
-              {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => (
-                <Text key={day} style={styles.calendarDayLabel}>{day}</Text>
-              ))}
-              {generateCalendarDays().map((day, idx) => (
-                <TouchableOpacity
-                  key={idx}
-                  style={[
-                    styles.calendarDay,
-                    day && day.toDateString() === baseDate.toDateString() && styles.calendarDaySelected,
-                  ]}
-                  onPress={() => {
-                    if (day) {
-                      setBaseDate(day);
-                      setShowCalendar(false);
-                      setIsLiveMode(false);
-                    }
-                  }}
-                  disabled={!day}
-                >
-                  <Text
-                    style={[
-                      styles.calendarDayText,
-                      day && day.toDateString() === baseDate.toDateString() && styles.calendarDayTextSelected,
-                      !day && styles.calendarDayTextEmpty,
-                    ]}
+            {showMonthPicker ? (
+              <View style={styles.monthGrid}>
+                {['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'].map((month, idx) => (
+                  <TouchableOpacity
+                    key={month}
+                    style={styles.monthButton}
+                    onPress={() => {
+                      setCalendarMonth(new Date(pickerYear, idx, 1));
+                      setShowMonthPicker(false);
+                    }}
                   >
-                    {day ? day.getDate() : ''}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
+                    <Text style={styles.monthButtonText}>
+                      {month.substring(0, 3)}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            ) : (
+              <View>
+                <View style={styles.calendarDayLabelsRow}>
+                  {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => (
+                    <Text key={day} style={styles.calendarDayLabel}>{day}</Text>
+                  ))}
+                </View>
+                <View style={styles.calendarGrid}>
+                  {generateCalendarDays().map((day, idx) => (
+                    <TouchableOpacity
+                      key={idx}
+                      style={[
+                        styles.calendarDay,
+                        day && day.toDateString() === baseDate.toDateString() && styles.calendarDaySelected,
+                      ]}
+                      onPress={() => {
+                        if (day) {
+                          setBaseDate(day);
+                          setShowCalendar(false);
+                        }
+                      }}
+                      disabled={!day}
+                    >
+                      <Text
+                        style={[
+                          styles.calendarDayText,
+                          day && day.toDateString() === baseDate.toDateString() && styles.calendarDayTextSelected,
+                          !day && styles.calendarDayTextEmpty,
+                        ]}
+                      >
+                        {day ? day.getDate() : ''}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+            )}
           </TouchableOpacity>
         </TouchableOpacity>
       </Modal>
 
       {/* Add to Calendar Modal */}
       <Modal
-        visible={showCalendarModal}
+        visible={showCalendarAdd}
         transparent
         animationType="slide"
-        onRequestClose={() => setShowCalendarModal(false)}
+        onRequestClose={() => setShowCalendarAdd(false)}
       >
         <View style={styles.modalOverlay}>
           <View style={styles.calendarAddPopup}>
             <View style={styles.calendarAddHeader}>
               <Text style={styles.calendarAddTitle}>Add to Calendar</Text>
-              <TouchableOpacity onPress={() => setShowCalendarModal(false)}>
+              <TouchableOpacity onPress={() => setShowCalendarAdd(false)}>
                 <Ionicons name="close" size={24} color="white" />
               </TouchableOpacity>
             </View>
@@ -1450,16 +1313,16 @@ export default function TimeConverterApp() {
               style={styles.calendarAddInput}
               placeholder="Meeting Title (Optional)"
               placeholderTextColor="#9ca3af"
-              value={meetingTitle}
-              onChangeText={setMeetingTitle}
+              value={eventTitle}
+              onChangeText={setEventTitle}
             />
 
             <TextInput
               style={[styles.calendarAddInput, styles.calendarAddNotesInput]}
               placeholder="Notes (Optional)"
               placeholderTextColor="#9ca3af"
-              value={meetingNotes}
-              onChangeText={setMeetingNotes}
+              value={eventNotes}
+              onChangeText={setEventNotes}
               multiline
               numberOfLines={3}
               textAlignVertical="top"
@@ -1473,13 +1336,13 @@ export default function TimeConverterApp() {
                     key={duration}
                     style={[
                       styles.durationOption,
-                      meetingDuration === duration && styles.durationOptionSelected
+                      eventDuration === duration && styles.durationOptionSelected
                     ]}
-                    onPress={() => setMeetingDuration(duration)}
+                    onPress={() => setEventDuration(duration)}
                   >
                     <Text style={[
                       styles.durationOptionText,
-                      meetingDuration === duration && styles.durationOptionTextSelected
+                      eventDuration === duration && styles.durationOptionTextSelected
                     ]}>
                       {duration} min
                     </Text>
