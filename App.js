@@ -12,6 +12,8 @@ import {
   PanResponder,
   Animated,
   Platform,
+  Linking,
+  Alert,
 } from 'react-native';
 
 import { LinearGradient } from 'expo-linear-gradient';
@@ -62,6 +64,16 @@ export default function TimeConverterApp() {
   // List of selected cities inside the current view
   const [selectedLocations, setSelectedLocations] = useState([]);
 
+  // Multi-select picker state
+  const [pickerSelected, setPickerSelected] = useState([]);
+
+  // Calendar add event state
+  const [showCalendarAdd, setShowCalendarAdd] = useState(false);
+  const [calendarAddLocation, setCalendarAddLocation] = useState(null);
+  const [eventTitle, setEventTitle] = useState('');
+  const [eventNotes, setEventNotes] = useState('');
+  const [eventDuration, setEventDuration] = useState(60);
+
   // The base time the whole view is calculated from
   // Initialize to current time for location cards (slider starts at 12:00am independently)
   const [baseTime, setBaseTime] = useState(now.getHours());
@@ -73,6 +85,8 @@ export default function TimeConverterApp() {
 
   // Which month is shown in the calendar
   const [calendarMonth, setCalendarMonth] = useState(new Date(now.getFullYear(), now.getMonth(), now.getDate()));
+  const [showMonthPicker, setShowMonthPicker] = useState(false);
+  const [pickerYear, setPickerYear] = useState(now.getFullYear());
 
   // Timeline slider constants
   const TICKS_PER_DAY = 96; // 24 hours * 4 (15-min intervals) - 00:00 to 23:45
@@ -362,48 +376,67 @@ export default function TimeConverterApp() {
     }));
   }, [selectedLocations, baseTime, baseMinutes, baseDate, currentView]);
 
-  // Adds a new city to the selected list
-  const handleLocationSelect = (location) => {
-    if (!selectedLocations.find(loc => loc.city === location.city)) {
-      const newLocation = { ...location, id: Date.now() };
-
-      // If this is the first location, initialize time to the location's current time
-      if (selectedLocations.length === 0) {
-        const now = new Date();
-        // Calculate the location's current time using UTC offset
-        const utcTime = now.getTime() + (now.getTimezoneOffset() * 60000); // Convert to UTC
-        const locationTime = new Date(utcTime + (location.utcOffset * 3600000)); // Apply location's offset
-
-        const locationHour = locationTime.getHours();
-        const locationMinutes = locationTime.getMinutes();
-
-        // Update base time to location's current time
-        setBaseTime(locationHour);
-        setBaseMinutes(locationMinutes);
-
-        // Update currentTickRef to match the new time
-        const currentTick = Math.round((locationHour * 60 + locationMinutes) / 15);
-        currentTickRef.current = currentTick;
-
-        // Animate timeline to location's current time
-        const totalMinutesExact = locationHour * 60 + locationMinutes;
-        const exactTickPosition = totalMinutesExact / 15;
-        const targetOffset = TIMELINE_CENTER - (exactTickPosition * TICK_SPACING);
-
-        sliderOffset.flattenOffset();
-        const relativeOffset = targetOffset - sliderOffset._offset;
-        Animated.spring(sliderOffset, {
-          toValue: relativeOffset,
-          useNativeDriver: true,
-          tension: 100,
-          friction: 10
-        }).start();
-      }
-
-      setSelectedLocations([...selectedLocations, newLocation]);
+  // Picker multi-select helpers
+  const togglePickerSelection = (location) => {
+    const exists = pickerSelected.find(l => l.city === location.city);
+    if (exists) {
+      setPickerSelected(pickerSelected.filter(l => l.city !== location.city));
+    } else {
+      setPickerSelected([...pickerSelected, location]);
     }
+  };
+
+  const removePickerTag = (location) => {
+    setPickerSelected(pickerSelected.filter(l => l.city !== location.city));
+  };
+
+  const addSelectedFromPicker = () => {
+    const toAdd = pickerSelected.filter(p => !selectedLocations.find(s => s.city === p.city));
+    if (toAdd.length === 0) {
+      setShowLocationPopup(false);
+      setPickerSelected([]);
+      return;
+    }
+
+    // If first locations being added, initialize time to first location's current time
+    if (selectedLocations.length === 0 && toAdd.length > 0) {
+      const firstLocation = toAdd[0];
+      const now = new Date();
+      const utcTime = now.getTime() + (now.getTimezoneOffset() * 60000);
+      const locationTime = new Date(utcTime + (firstLocation.utcOffset * 3600000));
+
+      const locationHour = locationTime.getHours();
+      const locationMinutes = locationTime.getMinutes();
+
+      setBaseTime(locationHour);
+      setBaseMinutes(locationMinutes);
+
+      const currentTick = Math.round((locationHour * 60 + locationMinutes) / 15);
+      currentTickRef.current = currentTick;
+
+      const totalMinutesExact = locationHour * 60 + locationMinutes;
+      const exactTickPosition = totalMinutesExact / 15;
+      const targetOffset = TIMELINE_CENTER - (exactTickPosition * TICK_SPACING);
+
+      sliderOffset.flattenOffset();
+      const relativeOffset = targetOffset - sliderOffset._offset;
+      Animated.spring(sliderOffset, {
+        toValue: relativeOffset,
+        useNativeDriver: true,
+        tension: 100,
+        friction: 10
+      }).start();
+    }
+
+    const withIds = toAdd.map(l => ({ ...l, id: Date.now() + Math.random() }));
+    setSelectedLocations([...selectedLocations, ...withIds]);
+    setPickerSelected([]);
     setShowLocationPopup(false);
     setSearchQuery('');
+  };
+
+  const handleLocationSelect = (location) => {
+    togglePickerSelection(location);
   };
 
   // Calculates transformed time for each additional location
@@ -670,64 +703,131 @@ export default function TimeConverterApp() {
 
   // Navigate calendar view to previous month
   const handlePrevMonth = () => {
-    setCalendarMonth(
-      new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() - 1, 1)
-    );
+    if (showMonthPicker) {
+      setPickerYear(pickerYear - 1);
+    } else {
+      setCalendarMonth(
+        new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() - 1, 1)
+      );
+    }
   };
 
   // Navigate calendar view to next month
   const handleNextMonth = () => {
-    setCalendarMonth(
-      new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 1)
-    );
+    if (showMonthPicker) {
+      setPickerYear(pickerYear + 1);
+    } else {
+      setCalendarMonth(
+        new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 1)
+      );
+    }
   };
 
-  // Creates a system calendar event using the current location/time data
-  const handleAddToCalendar = async () => {
-    if (selectedLocations.length === 0) return;
+  // Helper to get the pinned location's date/time as UTC
+  const getPinnedLocationDateTime = () => {
+    if (selectedLocations.length === 0) return null;
+
+    const mainLocation = selectedLocations[0];
+    const { hour, minutes, date } = calculateTimeForLocation(mainLocation);
+
+    // Create a UTC date representing the exact moment in the pinned location's timezone
+    const locationDateTime = new Date(date);
+    locationDateTime.setHours(hour, minutes, 0, 0);
+
+    // Calculate UTC time by subtracting the location's UTC offset
+    const utcTime = new Date(locationDateTime.getTime() - (mainLocation.utcOffset * 60 * 60 * 1000));
+
+    return utcTime;
+  };
+
+  // Opens the calendar add modal for a specific location
+  const handleAddToCalendar = (location) => {
+    setCalendarAddLocation(location);
+    setEventTitle('');
+    setEventNotes('');
+    setEventDuration(60);
+    setShowCalendarAdd(true);
+  };
+
+  // Add event to Google Calendar
+  const addToGoogleCalendar = () => {
+    const eventTime = getPinnedLocationDateTime();
+    if (!eventTime) return;
+
+    const endTime = new Date(eventTime.getTime() + eventDuration * 60000);
+
+    const formatGoogleDate = (date) => {
+      return date.toISOString().replace(/-|:|\.\d\d\d/g, '');
+    };
+
+    const title = eventTitle || 'Meeting';
+    const location = selectedLocations[0].city;
+    const description = eventNotes || '';
+
+    const url = `https://www.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(title)}&dates=${formatGoogleDate(eventTime)}/${formatGoogleDate(endTime)}&location=${encodeURIComponent(location)}&details=${encodeURIComponent(description)}&sf=true&output=xml`;
+
+    Linking.openURL(url);
+    setShowCalendarAdd(false);
+  };
+
+  // Add event to Outlook Calendar
+  const addToOutlookCalendar = () => {
+    const eventTime = getPinnedLocationDateTime();
+    if (!eventTime) return;
+
+    const endTime = new Date(eventTime.getTime() + eventDuration * 60000);
+
+    const formatOutlookDate = (date) => {
+      return date.toISOString();
+    };
+
+    const title = eventTitle || 'Meeting';
+    const location = selectedLocations[0].city;
+    const description = eventNotes || '';
+
+    const url = `https://outlook.live.com/calendar/0/deeplink/compose?subject=${encodeURIComponent(title)}&startdt=${formatOutlookDate(eventTime)}&enddt=${formatOutlookDate(endTime)}&location=${encodeURIComponent(location)}&body=${encodeURIComponent(description)}&path=/calendar/action/compose&rru=addevent`;
+
+    Linking.openURL(url);
+    setShowCalendarAdd(false);
+  };
+
+  // Add event to Apple Calendar (native)
+  const addToAppleCalendar = async () => {
+    const eventTime = getPinnedLocationDateTime();
+    if (!eventTime) return;
 
     try {
-      // Request OS permission
       const { status } = await Calendar.requestCalendarPermissionsAsync();
 
       if (status !== 'granted') {
-        alert('Calendar permission is required to add events');
+        Alert.alert('Permission Required', 'Calendar permission is required to add events');
         return;
       }
 
-      // Pick a calendar that supports event creation
-      const calendars = await Calendar.getCalendarsAsync(
-        Calendar.EntityTypes.EVENT
-      );
-      const defaultCalendar =
-        calendars.find((cal) => cal.allowsModifications) || calendars[0];
+      const calendars = await Calendar.getCalendarsAsync(Calendar.EntityTypes.EVENT);
+      const defaultCalendar = calendars.find(cal => cal.allowsModifications) || calendars[0];
 
       if (!defaultCalendar) {
-        alert('No calendar available');
+        Alert.alert('Error', 'No calendar available');
         return;
       }
 
-      // Build event time window (1 hour duration)
-      const location = selectedLocations[0];
-      const startDate = new Date(baseDate);
-      startDate.setHours(baseTime, baseMinutes, 0, 0);
-      const endDate = new Date(startDate);
-      endDate.setHours(endDate.getHours() + 1);
+      const endTime = new Date(eventTime.getTime() + eventDuration * 60000);
 
-      // Create the event
       await Calendar.createEventAsync(defaultCalendar.id, {
-        title: `Time in ${location.city}`,
-        startDate: startDate,
-        endDate: endDate,
-        location: location.city,
-        notes: `Current time: ${formatTime(baseTime, baseMinutes)}`,
-        timeZone: location.timezone,
+        title: eventTitle || 'Meeting',
+        startDate: eventTime,
+        endDate: endTime,
+        location: selectedLocations[0].city,
+        notes: eventNotes || '',
+        timeZone: 'default',
       });
 
-      alert('Event added to calendar!');
+      Alert.alert('Success', 'Event added to calendar!');
+      setShowCalendarAdd(false);
     } catch (error) {
       console.error('Error adding to calendar:', error);
-      alert('Failed to add event to calendar');
+      Alert.alert('Error', 'Failed to add event to calendar');
     }
   };
 
@@ -996,10 +1096,26 @@ export default function TimeConverterApp() {
           <View style={styles.locationPopup}>
             {/* Header with title and close button */}
             <View style={styles.locationPopupHeader}>
-              <Text style={styles.locationPopupTitle}>Add Location</Text>
+              <Text style={styles.locationPopupTitle}>Add Location(s)</Text>
               <TouchableOpacity onPress={() => setShowLocationPopup(false)}>
                 <Ionicons name="close" size={24} color="white" />
               </TouchableOpacity>
+            </View>
+
+            {/* Selected locations tags */}
+            <View style={styles.pickerTagsContainer}>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                {pickerSelected.map((p, i) => (
+                  <TouchableOpacity
+                    key={i}
+                    style={styles.pickerTag}
+                    onPress={() => removePickerTag(p)}
+                  >
+                    <Text style={styles.pickerTagText}>{p.city}</Text>
+                    <Ionicons name="close" size={14} color="white" style={{ marginLeft: 6 }} />
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
             </View>
 
             {/* Search input to filter cities */}
@@ -1009,26 +1125,51 @@ export default function TimeConverterApp() {
               placeholderTextColor="#9ca3af"
               value={searchQuery}
               onChangeText={setSearchQuery}
-              autoFocus
             />
 
             {/* Scrollable list of locations */}
             <ScrollView style={styles.locationList}>
-              {locations.map((location, idx) => (
-                <TouchableOpacity
-                  key={idx}
-                  style={styles.locationItem}
-                  onPress={() => handleLocationSelect(location)} // Adds location to selected list
-                >
-                  <Text style={styles.locationItemText}>
-                    {location.city}, {location.country}
-                  </Text>
-                  <Text style={styles.locationItemOffset}>
-                    UTC{location.utcOffset >= 0 ? '+' : ''}{location.utcOffset}
-                  </Text>
-                </TouchableOpacity>
-              ))}
+              {locations.map((location, idx) => {
+                const isSelected = !!pickerSelected.find(l => l.city === location.city);
+                return (
+                  <TouchableOpacity
+                    key={idx}
+                    style={[styles.locationItem, isSelected && styles.locationItemSelected]}
+                    onPress={() => handleLocationSelect(location)}
+                  >
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                      <View style={[styles.citySelectIndicator, isSelected && styles.citySelectIndicatorActive]} />
+                      <Text style={styles.locationItemText}>
+                        {location.city}, {location.country}
+                      </Text>
+                    </View>
+                    <Text style={styles.locationItemOffset}>
+                      UTC{location.utcOffset >= 0 ? '+' : ''}{location.utcOffset}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
             </ScrollView>
+
+            {/* Done/Cancel buttons */}
+            <View style={styles.pickerButtonsRow}>
+              <TouchableOpacity
+                style={styles.pickerButtonCancel}
+                onPress={() => {
+                  setShowLocationPopup(false);
+                  setPickerSelected([]);
+                }}
+              >
+                <Text style={styles.pickerButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.pickerButton, pickerSelected.length === 0 && styles.pickerButtonDisabled]}
+                onPress={addSelectedFromPicker}
+                disabled={pickerSelected.length === 0}
+              >
+                <Text style={styles.pickerButtonText}>Add Selected ({pickerSelected.length})</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </Modal>
@@ -1056,51 +1197,187 @@ export default function TimeConverterApp() {
               <TouchableOpacity onPress={handlePrevMonth} style={styles.calendarArrow}>
                 <Ionicons name="chevron-back" size={24} color="white" />
               </TouchableOpacity>
-              <Text style={styles.calendarTitle}>
-                {calendarMonth.toLocaleString('default', { month: 'long', year: 'numeric' })}
-              </Text>
+              <TouchableOpacity onPress={() => {
+                if (!showMonthPicker) {
+                  setPickerYear(calendarMonth.getFullYear());
+                }
+                setShowMonthPicker(!showMonthPicker);
+              }}>
+                <Text style={styles.calendarTitle}>
+                  {showMonthPicker
+                    ? pickerYear
+                    : calendarMonth.toLocaleString('default', { month: 'long', year: 'numeric' })}
+                </Text>
+              </TouchableOpacity>
               <TouchableOpacity onPress={handleNextMonth} style={styles.calendarArrow}>
                 <Ionicons name="chevron-forward" size={24} color="white" />
               </TouchableOpacity>
             </View>
-
-            {/* Calendar grid: weekdays + dates */}
-            <View style={styles.calendarGrid}>
-              {/* Weekday labels */}
-              {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => (
-                <Text key={day} style={styles.calendarDayLabel}>{day}</Text>
-              ))}
-
-              {/* Calendar days */}
-              {generateCalendarDays().map((day, idx) => (
-                <TouchableOpacity
-                  key={idx}
-                  style={[
-                    styles.calendarDay,
-                    day && day.toDateString() === baseDate.toDateString() && styles.calendarDaySelected,
-                  ]}
-                  onPress={() => {
-                    if (day) {
-                      setBaseDate(day);      // Set selected date
-                      setShowCalendar(false); // Close modal
-                    }
-                  }}
-                  disabled={!day} // Disabled for placeholder days
-                >
-                  <Text
-                    style={[
-                      styles.calendarDayText,
-                      day && day.toDateString() === baseDate.toDateString() && styles.calendarDayTextSelected,
-                      !day && styles.calendarDayTextEmpty, // Empty text for placeholder
-                    ]}
+            {showMonthPicker ? (
+              <View style={styles.monthGrid}>
+                {['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'].map((month, idx) => (
+                  <TouchableOpacity
+                    key={month}
+                    style={styles.monthButton}
+                    onPress={() => {
+                      setCalendarMonth(new Date(pickerYear, idx, 1));
+                      setShowMonthPicker(false);
+                    }}
                   >
-                    {day ? day.getDate() : ''}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
+                    <Text style={styles.monthButtonText}>
+                      {month.substring(0, 3)}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            ) : (
+              <View>
+                <View style={styles.calendarDayLabelsRow}>
+                  {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => (
+                    <Text key={day} style={styles.calendarDayLabel}>{day}</Text>
+                  ))}
+                </View>
+                <View style={styles.calendarGrid}>
+                  {generateCalendarDays().map((day, idx) => (
+                    <TouchableOpacity
+                      key={idx}
+                      style={[
+                        styles.calendarDay,
+                        day && day.toDateString() === baseDate.toDateString() && styles.calendarDaySelected,
+                      ]}
+                      onPress={() => {
+                        if (day) {
+                          setBaseDate(day);
+                          setShowCalendar(false);
+                        }
+                      }}
+                      disabled={!day}
+                    >
+                      <Text
+                        style={[
+                          styles.calendarDayText,
+                          day && day.toDateString() === baseDate.toDateString() && styles.calendarDayTextSelected,
+                          !day && styles.calendarDayTextEmpty,
+                        ]}
+                      >
+                        {day ? day.getDate() : ''}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+            )}
           </TouchableOpacity>
         </TouchableOpacity>
+      </Modal>
+
+      {/* Add to Calendar Modal */}
+      <Modal
+        visible={showCalendarAdd}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowCalendarAdd(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.calendarAddPopup}>
+            <View style={styles.calendarAddHeader}>
+              <Text style={styles.calendarAddTitle}>Add to Calendar</Text>
+              <TouchableOpacity onPress={() => setShowCalendarAdd(false)}>
+                <Ionicons name="close" size={24} color="white" />
+              </TouchableOpacity>
+            </View>
+
+            {selectedLocations.length > 0 && (
+              <View style={styles.calendarAddInfo}>
+                <View style={styles.calendarAddTimeRow}>
+                  <Ionicons name="time-outline" size={20} color="#9ca3af" />
+                  <Text style={styles.calendarAddTimeText}>
+                    {(() => {
+                      const location = selectedLocations[0];
+                      const { hour, minutes, date } = calculateTimeForLocation(location);
+                      const h = hour % 12 || 12;
+                      const m = minutes.toString().padStart(2, '0');
+                      const ampm = hour >= 12 ? 'PM' : 'AM';
+                      const dateStr = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+                      return `${h}:${m} ${ampm} - ${dateStr}`;
+                    })()}
+                  </Text>
+                </View>
+                <Text style={styles.calendarAddSubtext}>
+                  {selectedLocations[0].city} Time
+                </Text>
+              </View>
+            )}
+
+            <TextInput
+              style={styles.calendarAddInput}
+              placeholder="Meeting Title (Optional)"
+              placeholderTextColor="#9ca3af"
+              value={eventTitle}
+              onChangeText={setEventTitle}
+            />
+
+            <TextInput
+              style={[styles.calendarAddInput, styles.calendarAddNotesInput]}
+              placeholder="Notes (Optional)"
+              placeholderTextColor="#9ca3af"
+              value={eventNotes}
+              onChangeText={setEventNotes}
+              multiline
+              numberOfLines={3}
+              textAlignVertical="top"
+            />
+
+            <View style={styles.calendarAddDurationContainer}>
+              <Text style={styles.calendarAddLabel}>Duration</Text>
+              <View style={styles.durationOptionsContainer}>
+                {[15, 30, 60, 90, 120].map((duration) => (
+                  <TouchableOpacity
+                    key={duration}
+                    style={[
+                      styles.durationOption,
+                      eventDuration === duration && styles.durationOptionSelected
+                    ]}
+                    onPress={() => setEventDuration(duration)}
+                  >
+                    <Text style={[
+                      styles.durationOptionText,
+                      eventDuration === duration && styles.durationOptionTextSelected
+                    ]}>
+                      {duration} min
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+
+            <View style={styles.calendarAddButtons}>
+              <TouchableOpacity
+                style={styles.calendarAddButton}
+                onPress={addToGoogleCalendar}
+              >
+                <Ionicons name="logo-google" size={24} color="white" />
+                <Text style={styles.calendarAddButtonText}>Google Calendar</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.calendarAddButton}
+                onPress={addToOutlookCalendar}
+              >
+                <Ionicons name="mail-outline" size={24} color="white" />
+                <Text style={styles.calendarAddButtonText}>Outlook</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.calendarAddButton}
+                onPress={addToAppleCalendar}
+              >
+                <Ionicons name="calendar" size={24} color="white" />
+                <Text style={styles.calendarAddButtonText}>Apple Calendar</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
       </Modal>
     </View>
   );
